@@ -145,8 +145,13 @@ export default function TriangleBackground({ isLightMode }) {
     }
 
     const onKeyDown = (e) => {
-      // Ignore key events from inputs and textareas
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.isContentEditable) return;
+      // Ignore key events from inputs, textareas, monaco editors, and contentEditables
+      if (
+        ['INPUT', 'TEXTAREA'].includes(e.target.tagName) || 
+        e.target.isContentEditable ||
+        e.target.closest?.('.monaco-editor') ||
+        e.target.closest?.('.inputarea')
+      ) return;
 
       if (e.code === 'Space') {
         e.preventDefault()

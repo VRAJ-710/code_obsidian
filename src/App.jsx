@@ -13,15 +13,39 @@ import ZaraExaminer from './components/ZaraExaminer'
 import CourseViewer from './components/CourseViewer'
 import CourseExam from './components/CourseExam'
 import Login from './components/Login'
+import ResumeUpload from './components/ResumeUpload'
+import CourseRecommender from './components/CourseRecommender'
+import InterviewPrep from './components/InterviewPrep'
 import CyberLab from './components/CyberLab'
+import SplitFlapText from './components/SplitFlapText'
+import './components/SplitFlapText.css'
+import ClickSpark from './components/ClickSpark'
+import DecryptedText from './components/DecryptedText'
+import SidebarFlowingButton from './components/SidebarFlowingButton'
 import { dbService } from './dbService'
-import { Home, Bot, Code, Zap, Target, Map, Brain, Search, Bug, Shield } from 'lucide-react'
+import { Home, Bot, Code, Zap, Target, Map, Brain, Search, Bug, Shield, FileText, MessageSquare, GraduationCap, UploadCloud, Sparkles, Terminal } from 'lucide-react'
 import './App.css'
 
 const CodeEditor = lazy(() => import('./components/CodeEditor'))
 
+function usePrefersReducedMotion() {
+  const [prefersReduced, setPrefersReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handleChange = () => setPrefersReduced(mediaQuery.matches);
+    handleChange();
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+  return prefersReduced;
+}
+
 const NAV_ITEMS = [
   { id: 'home', icon: <Home className="w-5 h-5" />, label: 'Home' },
+  { id: 'resume', icon: <FileText className="w-5 h-5" />, label: 'Resume Profile' },
+  { id: 'interview', icon: <MessageSquare className="w-5 h-5" />, label: 'Interview Prep' },
+  { id: 'courses', icon: <GraduationCap className="w-5 h-5" />, label: 'Recommended' },
   { id: 'studio', icon: <Bot className="w-5 h-5" />, label: 'AI Studio' },
   { id: 'playground', icon: <Code className="w-5 h-5" />, label: 'Playground' },
   { id: 'zara', icon: <Zap className="w-5 h-5" />, label: 'Zara Exam' },
@@ -56,6 +80,23 @@ const INITIAL_SKILLS = {
 }
 
 export default function App() {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  const renderDecryptText = (text, className = '') => {
+    if (prefersReducedMotion) {
+      return <span className={className}>{text}</span>;
+    }
+    return (
+      <DecryptedText
+        text={text}
+        animateOn="view"
+        sequential
+        revealDirection="start"
+        className={className}
+      />
+    );
+  };
+
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
 
   // Initialize user from LocalStorage session
@@ -73,17 +114,26 @@ export default function App() {
   const [trackContext, setTrackContext] = useState(null)
   const trackMsgSent = useRef(false)
   const [activeCourse, setActiveCourse] = useState(null)
+  const [topControlsHovered, setTopControlsHovered] = useState(false)
+  const [resumeProfile, setResumeProfile] = useState(null)
 
   // Hydrate Data on initial load or user switch
   useEffect(() => {
     if (currentUser) {
       dbService.getUserData(currentUser).then(data => {
-        if (data && Object.keys(data.skills).length > 0) {
-          setSkills(data.skills);
+        if (data && data.skills && Object.keys(data.skills).length > 0) {
+          const cleanSkills = Object.fromEntries(
+            Object.entries(data.skills).filter(([, v]) => v && typeof v.mastery === 'number')
+          );
+          setSkills(Object.keys(cleanSkills).length > 0 ? cleanSkills : INITIAL_SKILLS);
         } else if (data) {
           // Initialize DB with standard default if new user
           dbService.updateField(currentUser, 'skills', INITIAL_SKILLS);
           setSkills(INITIAL_SKILLS);
+        }
+
+        if (data && data.resume) {
+          setResumeProfile(data.resume);
         }
 
         // Track daily visit for Streak forever
@@ -132,14 +182,17 @@ export default function App() {
     if (typeof skillsOrName === 'object') {
       setSkills(skillsOrName)
     } else {
-      setSkills(prev => ({
-        ...prev,
-        [skillsOrName]: prev[skillsOrName] ? {
-          ...prev[skillsOrName],
-          mastery: Math.min(100, Math.max(0, prev[skillsOrName].mastery + delta)),
-          lastPracticed: 'just now',
-        } : prev[skillsOrName],
-      }))
+      setSkills(prev => {
+        const base = prev[skillsOrName] || { mastery: 50, confidence: 'medium', errorFreq: 0, lastPracticed: 'never' }
+        return {
+          ...prev,
+          [skillsOrName]: {
+            ...base,
+            mastery: Math.min(100, Math.max(0, base.mastery + delta)),
+            lastPracticed: 'just now',
+          },
+        }
+      })
     }
   }
 
@@ -185,7 +238,14 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex overflow-hidden magic-hover-container" style={{ background: 'var(--bg-primary)', fontFamily: 'var(--font-body)' }}>
+    <div className="h-screen w-full flex overflow-hidden magic-hover-container" style={{ background: 'var(--bg-primary)', fontFamily: 'var(--font-body)' }}>
+      <ClickSpark
+        sparkColor="#a54005"
+        sparkSize={10}
+        sparkRadius={15}
+        sparkCount={8}
+        duration={400}
+      />
 
       <TriangleBackground isLightMode={theme === 'light'} />
 
@@ -193,7 +253,7 @@ export default function App() {
       <motion.aside
         animate={{ width: sidebarCollapsed ? 72 : 220 }}
         transition={{ duration: 0.3, ease: 'easeInOut' }}
-        className="relative z-50 flex-shrink-0 hidden md:flex flex-col py-6 border-r border-white/10"
+        className="h-screen relative z-50 flex-shrink-0 hidden md:flex flex-col py-6 border-r border-white/10"
         style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(20px)' }}
       >
         <div className="px-4 mb-8 flex items-center gap-3 overflow-hidden">
@@ -207,26 +267,16 @@ export default function App() {
           )}
         </div>
 
-        <nav className="flex-1 flex flex-col gap-1 px-2">
+        <nav className="flex-1 flex flex-col gap-1.5 px-2 overflow-y-auto select-none [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full">
           {NAV_ITEMS.map(item => (
-            <motion.button
+            <SidebarFlowingButton
               key={item.id}
-              whileHover={{ x: 4 }} whileTap={{ scale: 0.97 }}
+              item={item}
+              isActive={activePage === item.id}
               onClick={() => setActivePage(item.id)}
-              className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all ${activePage === item.id
-                ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
-                : 'text-white/50 hover:text-white hover:bg-white/8'
-                }`}
-              style={{ fontFamily: 'var(--font-body)', fontWeight: 500 }}
-            >
-              <span className="text-xl flex-shrink-0">{item.icon}</span>
-              {!sidebarCollapsed && (
-                <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }}>{item.label}</motion.span>
-              )}
-              {activePage === item.id && !sidebarCollapsed && (
-                <motion.div layoutId="activeIndicator" className="ml-auto w-1.5 h-1.5 rounded-full bg-orange-400" />
-              )}
-            </motion.button>
+              sidebarCollapsed={sidebarCollapsed}
+              prefersReducedMotion={prefersReducedMotion}
+            />
           ))}
         </nav>
 
@@ -300,14 +350,26 @@ export default function App() {
                         </div>
                       </motion.div>
                       <div className="flex flex-wrap items-baseline justify-center hero-text-group cursor-pointer transition-transform hover:scale-105 duration-300">
-                        <motion.span className="hero-line-2"
-                          initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.7 }}>
-                          Pair
-                        </motion.span>
-                        <motion.span className="hero-line-3"
-                          initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5, duration: 0.7 }}>
-                          Programming.
-                        </motion.span>
+                        <motion.div
+                          initial={{ opacity: 0, y: 30 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.35, duration: 0.7 }}
+                        >
+                          <SplitFlapText
+                            words={['CODE OBSIDIAN']}
+                            loop={false}
+                            flipDuration={0.12}
+                            stagger={0.06}
+                            charset="alphanumeric"
+                            flipsPerChar={8}
+                            padTo={14}
+                            tileColor="#1A1A2E"
+                            textColor="#FF6B35"
+                            tileRadius={12}
+                            gap={4}
+                            fontSize="clamp(3rem, 8vw, 6rem)"
+                          />
+                        </motion.div>
                       </div>
                     </div>
 
@@ -320,13 +382,21 @@ export default function App() {
                       initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.05 }}
                       className="flex flex-col sm:flex-row gap-4 justify-center mt-10"
                     >
-                      <motion.button whileHover={{ scale: 1.05, boxShadow: '0 20px 50px rgba(255,107,53,0.4)' }} whileTap={{ scale: 0.95 }}
-                        onClick={() => setActivePage('studio')} className="btn-primary text-sm px-10 py-4">
-                        → Start Learning
+                      <motion.button
+                        whileHover={prefersReducedMotion ? {} : { scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => setActivePage('studio')}
+                        className="px-10 py-4 font-mono uppercase tracking-wider text-xs font-bold bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl transition-all shadow-[0_0_20px_rgba(249,115,22,0.4)] hover:shadow-[0_0_35px_rgba(249,115,22,0.6)] focus-visible:ring-2 focus-visible:ring-orange-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black outline-none flex items-center justify-center gap-2"
+                      >
+                        Start Learning
                       </motion.button>
-                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                        onClick={() => setActivePage('tracks')} className="btn-secondary text-sm px-10 py-4">
-                        View Tracks ↗
+                      <motion.button
+                        whileHover={prefersReducedMotion ? {} : { scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => setActivePage('tracks')}
+                        className="px-10 py-4 font-mono uppercase tracking-wider text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 hover:border-cyan-400/50 rounded-xl transition-all shadow-[0_0_15px_rgba(0,212,255,0.15)] hover:shadow-[0_0_25px_rgba(0,212,255,0.35)] focus-visible:ring-2 focus-visible:ring-cyan-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black outline-none flex items-center justify-center gap-2"
+                      >
+                        View Tracks
                       </motion.button>
                     </motion.div>
 
@@ -339,7 +409,7 @@ export default function App() {
                   >
                     {[
                       { value: '4', label: 'AI Agents' },
-                      { value: '10', label: 'Skill Nodes' },
+                      { value: '15', label: 'Skill Nodes' },
                       { value: '5', label: 'Tracks' },
                       { value: '3', label: 'Learning Modes' },
                     ].map(s => (
@@ -349,54 +419,118 @@ export default function App() {
                       </div>
                     ))}
                   </motion.div>
+
+                  {/* Resume Onboarding Prompt */}
+                  {(!resumeProfile || !resumeProfile.name) && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="max-w-4xl mx-auto my-12 p-6 rounded-2xl glass-card border border-primary/40 bg-primary/10 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl"
+                    >
+                      <div className="flex items-center gap-4 text-left">
+                        <div className="w-14 h-14 rounded-2xl bg-primary/20 text-primary border border-primary/30 flex items-center justify-center flex-shrink-0">
+                          <UploadCloud className="w-7 h-7" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-white flex items-center gap-2">
+                            Upload Your Resume to Calibrate Your Skill Graph <Sparkles className="w-4 h-4 text-orange-400" />
+                          </h3>
+                          <p className="text-xs text-white/70 leading-relaxed mt-1">
+                            Extract skills, projects, and work experience directly into your live skill graph to personalize Interview Prep and Course Recommendations.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setActivePage('resume')}
+                        className="btn-primary text-xs px-6 py-3 font-semibold whitespace-nowrap shadow-lg flex items-center gap-2"
+                      >
+                        <FileText className="w-4 h-4" /> Upload Resume →
+                      </button>
+                    </motion.div>
+                  )}
                 </div>
               </section>
 
               {/* Features */}
               <section className="py-24 px-8 max-w-6xl mx-auto relative z-10">
                 <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px] rounded-3xl -z-10 mt-12 mb-12 border border-white/5"></div>
-                <motion.h2 initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-                  className="text-center mb-16 drop-shadow-lg"
+                
+                {/* Eyebrow Label */}
+                <div className="flex flex-col items-center mb-4">
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded bg-cyan-500/5 border border-cyan-500/10 text-cyan-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+                    <Terminal className="w-3.5 h-3.5" />
+                    <span>// CORE_CAPABILITIES</span>
+                  </div>
+                </div>
+
+                <h2 className="text-center mb-16 drop-shadow-lg flex flex-wrap items-center justify-center gap-x-2.5"
                   style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(2rem,5vw,3.5rem)', letterSpacing: '-0.02em' }}>
-                  Built for <span className="gradient-text drop-shadow-xl">Real Learning</span>
-                </motion.h2>
+                  {renderDecryptText("Built for", "text-white")}
+                  {renderDecryptText("Real Learning", "gradient-text drop-shadow-xl")}
+                </h2>
                 <FeatureCards />
               </section>
 
               {/* Agents */}
               <section className="py-24 px-8 relative" style={{ background: 'rgba(0,0,0,0.6)' }}>
                 <div className="max-w-6xl mx-auto">
-                  <motion.h2 initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-                    className="text-center mb-16 drop-shadow-lg"
+                  
+                  {/* Eyebrow Label */}
+                  <div className="flex flex-col items-center mb-4">
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded bg-orange-500/5 border border-orange-500/10 text-orange-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+                      <Bot className="w-3.5 h-3.5" />
+                      <span>// AGENT_ROSTER</span>
+                    </div>
+                  </div>
+
+                  <h2 className="text-center mb-16 drop-shadow-lg flex flex-wrap items-center justify-center gap-x-2.5"
                     style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(2rem,5vw,3.5rem)', letterSpacing: '-0.02em' }}>
-                    Meet Your <span className="gradient-text drop-shadow-xl">AI Team</span>
-                  </motion.h2>
+                    {renderDecryptText("Meet Your", "text-white")}
+                    {renderDecryptText("AI Team", "gradient-text drop-shadow-xl")}
+                  </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 exclude-magic">
-                    {AGENTS.map((agent, i) => (
-                      <motion.div key={agent.id}
-                        initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
-                        transition={{ delay: i * 0.15 }} whileHover={{ y: -8, scale: 1.02 }}
-                        className="glass-card p-8 text-center cursor-pointer group"
-                        onClick={() => { if (agent.id === 'zara') setActivePage('zara'); else { setActiveAgent(agent.id); setActivePage('studio') } }}
-                      >
-                        <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${agent.color} flex items-center justify-center text-4xl mx-auto mb-6 group-hover:scale-110 transition-transform shadow-lg`}>
-                          {agent.emoji}
-                        </div>
-                        <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.5rem', marginBottom: '0.25rem' }}>{agent.label}</h3>
-                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#FF6B35', marginBottom: '1rem' }}>{agent.desc}</p>
-                        <p className="text-white/60 text-sm leading-relaxed">
-                          {agent.id === 'teacher' && 'Socratic method — builds true understanding through guided questioning.'}
-                          {agent.id === 'reviewer' && 'Real-time code analysis — bugs, style, performance, best practices.'}
-                          {agent.id === 'debugger' && 'Systematic debugging — find root causes, not just symptoms.'}
-                          {agent.id === 'zara' && 'Real-world problem challenger — scores your answers and updates your skill graph live.'}
-                        </p>
-                        <div className="mt-6 pt-6 border-t border-white/10">
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#FF6B35' }}>
-                            {agent.id === 'zara' ? 'Take a Challenge →' : `Chat with ${agent.label} →`}
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))}
+                    {AGENTS.map((agent, i) => {
+                      const agentStyles = {
+                        teacher: { hoverBorder: 'hover:border-orange-500/50', hoverGlow: 'hover:shadow-[0_0_25px_rgba(249,115,22,0.4)]', focusRing: 'focus-visible:ring-orange-500/60' },
+                        reviewer: { hoverBorder: 'hover:border-blue-500/50', hoverGlow: 'hover:shadow-[0_0_25px_rgba(59,130,246,0.4)]', focusRing: 'focus-visible:ring-blue-500/60' },
+                        debugger: { hoverBorder: 'hover:border-purple-500/50', hoverGlow: 'hover:shadow-[0_0_25px_rgba(168,85,247,0.4)]', focusRing: 'focus-visible:ring-purple-500/60' },
+                        zara: { hoverBorder: 'hover:border-violet-600/50', hoverGlow: 'hover:shadow-[0_0_25px_rgba(124,58,237,0.4)]', focusRing: 'focus-visible:ring-violet-600/60' }
+                      };
+                      const style = agentStyles[agent.id] || agentStyles.teacher;
+                      return (
+                        <motion.div key={agent.id}
+                          initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+                          transition={{ delay: i * 0.15 }}
+                          whileHover={prefersReducedMotion ? {} : { y: -8, scale: 1.02 }}
+                          className={`p-8 text-center cursor-pointer group bg-[#0c0d14] border border-white/10 rounded-2xl transition-all duration-300 ${style.hoverBorder} ${style.hoverGlow} ${style.focusRing} focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black outline-none`}
+                          onClick={() => { if (agent.id === 'zara') setActivePage('zara'); else { setActiveAgent(agent.id); setActivePage('studio') } }}
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              if (agent.id === 'zara') setActivePage('zara');
+                              else { setActiveAgent(agent.id); setActivePage('studio') }
+                            }
+                          }}
+                        >
+                          <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${agent.color} flex items-center justify-center text-4xl mx-auto mb-6 group-hover:scale-110 transition-transform shadow-lg`}>
+                            {agent.emoji}
+                          </div>
+                          <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.5rem', marginBottom: '0.25rem' }}>{agent.label}</h3>
+                          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#FF6B35', marginBottom: '1rem' }}>{agent.desc}</p>
+                          <p className="text-white/60 text-sm leading-relaxed">
+                            {agent.id === 'teacher' && 'Socratic method — builds true understanding through guided questioning.'}
+                            {agent.id === 'reviewer' && 'Real-time code analysis — bugs, style, performance, best practices.'}
+                            {agent.id === 'debugger' && 'Systematic debugging — find root causes, not just symptoms.'}
+                            {agent.id === 'zara' && 'Real-world problem challenger — scores your answers and updates your skill graph live.'}
+                          </p>
+                          <div className="mt-6 pt-6 border-t border-white/10">
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#FF6B35' }}>
+                              {agent.id === 'zara' ? 'Take a Challenge →' : `Chat with ${agent.label} →`}
+                            </span>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 </div>
               </section>
@@ -412,9 +546,13 @@ export default function App() {
                       Ready to Level Up?
                     </h2>
                     <p className="text-white/70 font-medium mb-8 text-lg drop-shadow-md">Start your first session — completely free.</p>
-                    <motion.button whileHover={{ scale: 1.05, boxShadow: '0 20px 50px rgba(255,107,53,0.5)' }} whileTap={{ scale: 0.95 }}
-                      onClick={() => setActivePage('studio')} className="btn-primary text-sm px-12 py-5">
-                      → Launch Code Obsidian
+                    <motion.button
+                      whileHover={prefersReducedMotion ? {} : { scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setActivePage('studio')}
+                      className="px-12 py-5 font-mono uppercase tracking-wider text-sm font-bold bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl transition-all shadow-[0_0_20px_rgba(249,115,22,0.4)] hover:shadow-[0_0_35px_rgba(249,115,22,0.6)] focus-visible:ring-2 focus-visible:ring-orange-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black outline-none flex items-center justify-center gap-2 mx-auto"
+                    >
+                      [ Launch Code Obsidian ]
                     </motion.button>
                   </motion.div>
                 </div>
@@ -428,6 +566,42 @@ export default function App() {
                   Press Space to drop light · Click canvas to add new light
                 </p>
               </footer>
+            </motion.div>
+          )}
+
+          {/* RESUME PROFILE */}
+          {activePage === 'resume' && (
+            <motion.div key="resume" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
+              <ResumeUpload
+                currentUser={currentUser}
+                resumeProfile={resumeProfile}
+                setResumeProfile={setResumeProfile}
+                skills={skills}
+                updateSkills={updateSkills}
+                setSkills={setSkills}
+              />
+            </motion.div>
+          )}
+
+          {/* INTERVIEW PREP */}
+          {activePage === 'interview' && (
+            <motion.div key="interview" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
+              <InterviewPrep
+                currentUser={currentUser}
+                skills={skills}
+                updateSkills={updateSkills}
+                resumeProfile={resumeProfile}
+              />
+            </motion.div>
+          )}
+
+          {/* RECOMMENDED COURSES */}
+          {activePage === 'courses' && (
+            <motion.div key="courses" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
+              <CourseRecommender
+                skills={skills}
+                resumeProfile={resumeProfile}
+              />
             </motion.div>
           )}
 
@@ -546,7 +720,7 @@ export default function App() {
           {/* SKILL TRACK */}
           {activePage === 'skill-track' && (
             <motion.div key="skill-track" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
-              <SkillTrack skills={skills} onSkillUpdate={updateSkills} currentUser={currentUser} />
+              <SkillTrack skills={skills} onSkillUpdate={updateSkills} currentUser={currentUser} resumeProfile={resumeProfile} />
             </motion.div>
           )}
 
@@ -598,42 +772,75 @@ export default function App() {
 
         </AnimatePresence>
       </main>
-      {/* Top Right Controls */}
-      <div className="fixed top-4 right-4 z-30 flex items-center gap-3">
-        {/* Theme toggle button */}
-        <motion.button
-          whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-          onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 shadow-lg"
-          style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-primary)' }}
-        >
-          <span>{theme === 'dark' ? '🌞' : '🌙'}</span>
-          <span className="hidden sm:inline">{theme === 'dark' ? 'Light' : 'Dark'}</span>
-        </motion.button>
+      {/* ── Top Right Hover-Activated Slide-Out Toolbar ─────────────────────── */}
+      <div
+        className="fixed top-4 right-4 z-50 flex items-center"
+        onMouseEnter={() => setTopControlsHovered(true)}
+        onMouseLeave={() => setTopControlsHovered(false)}
+      >
+        <AnimatePresence mode="wait">
+          {topControlsHovered ? (
+            <motion.div
+              key="expanded-toolbar"
+              initial={{ opacity: 0, x: 25, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 25, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="flex items-center gap-3 p-2 rounded-2xl border border-cyan-500/30 bg-[#0a0a10]/90 backdrop-blur-xl shadow-[0_0_30px_rgba(0,212,255,0.25)]"
+            >
+              {/* Theme toggle button */}
+              <motion.button
+                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 hover:border-cyan-500/40 text-xs font-mono transition-colors"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)' }}
+              >
+                <span>{theme === 'dark' ? '🌞' : '🌙'}</span>
+                <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+              </motion.button>
 
-        {/* Profile / Logout button */}
-        <motion.div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-500/20 border border-purple-500/30 text-xs font-mono text-purple-300">
-          <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-          {currentUser}
-        </motion.div>
-        <button
-          onClick={handleLogout}
-          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-mono text-white/40 hover:text-white/80 transition-colors border border-white/10"
-        >
-          Logout
-        </button>
+              {/* Profile / Username badge */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-500/20 border border-purple-500/30 text-xs font-mono text-purple-300">
+                <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                {currentUser}
+              </div>
 
-        {/* Dashboard toggle button */}
-        <motion.button
-          whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-          onClick={() => setDashboardOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15"
-          style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-primary)' }}
-        >
-          <span>📊</span>
-          <span className="hidden sm:inline">Dashboard</span>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', animation: 'pulse 2s infinite' }} />
-        </motion.button>
+              {/* Logout button */}
+              <button
+                onClick={handleLogout}
+                className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-red-500/20 hover:border-red-500/30 text-xs font-mono text-white/50 hover:text-red-300 transition-all border border-white/10"
+              >
+                Logout
+              </button>
+
+              {/* Dashboard toggle button */}
+              <motion.button
+                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                onClick={() => setDashboardOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-green-500/30 bg-green-500/10 text-xs font-mono text-green-300 shadow-md hover:bg-green-500/20 transition-all"
+              >
+                <span>📊</span>
+                <span>Dashboard</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              </motion.button>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="collapsed-pill"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.15 }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-cyan-500/30 bg-[#0a0a10]/80 backdrop-blur-xl shadow-[0_0_15px_rgba(0,212,255,0.15)] cursor-pointer hover:border-cyan-400 group transition-all"
+            >
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <span className="text-xs font-mono text-cyan-300 font-bold tracking-wider group-hover:text-white transition-colors">
+                ⚙️ {currentUser}
+              </span>
+              <span className="text-[10px] text-cyan-400/60 font-mono">◄</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <SlidingDashboard

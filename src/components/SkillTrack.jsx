@@ -5,31 +5,94 @@ import ZaraExaminer from './ZaraExaminer'
 import { dbService } from '../dbService'
 import { Target, CheckCircle, AlertTriangle, Brain, Search, CheckCircle2, AlertCircle, Flame, TrendingUp, Map } from 'lucide-react'
 
-// ── Dependency / Graph Info (From SkillGraph) ──────────────────────────
-const DEPENDENCIES = {
-  'Variables': [],
-  'Data Types': ['Variables'],
-  'Conditionals': ['Variables', 'Data Types'],
-  'Loops': ['Variables', 'Conditionals'],
-  'Functions': ['Variables', 'Loops'],
-  'Arrays': ['Variables', 'Loops'],
-  'Recursion': ['Functions'],
-  'Pointers': ['Variables', 'Arrays'],
-  'OOP': ['Functions', 'Arrays'],
-  'Time Complexity': ['Loops', 'Recursion', 'Arrays'],
+// ── Dependency / Graph Info (Dynamic Generation) ──────────────────────────
+function getDynamicDependencies(skillNames) {
+  const deps = {}
+  skillNames.forEach(name => {
+    // Core dependencies
+    if (name === 'Variables') deps[name] = []
+    else if (name === 'Data Types') deps[name] = ['Variables']
+    else if (name === 'Conditionals') deps[name] = ['Variables', 'Data Types']
+    else if (name === 'Loops') deps[name] = ['Variables', 'Conditionals']
+    else if (name === 'Functions') deps[name] = ['Variables', 'Loops']
+    else if (name === 'Arrays') deps[name] = ['Variables', 'Loops']
+    else if (name === 'Recursion') deps[name] = ['Functions']
+    else if (name === 'Pointers') deps[name] = ['Variables', 'Arrays']
+    else if (name === 'OOP') deps[name] = ['Functions', 'Arrays']
+    else if (name === 'Time Complexity') deps[name] = ['Loops', 'Recursion', 'Arrays']
+    // Custom/Extracted skill dependencies
+    else if (name === 'Python') deps[name] = ['Variables', 'Data Types']
+    else if (name === 'JavaScript') deps[name] = ['Variables', 'Data Types']
+    else if (name === 'React') deps[name] = ['JavaScript']
+    else if (name === 'Node.js') deps[name] = ['JavaScript']
+    else if (name === 'SQL') deps[name] = ['Data Types']
+    else if (name === 'Web Hacking') deps[name] = ['Functions']
+    else if (name === 'Network Security') deps[name] = ['Variables']
+    else if (name === 'Cryptography') deps[name] = ['Variables', 'Data Types']
+    else if (name === 'Reverse Engineering') deps[name] = ['Pointers', 'Data Types']
+    else if (name === 'Incident Response') deps[name] = ['Web Hacking', 'Network Security']
+    else {
+      const potentialDeps = []
+      if (skillNames.includes('Variables')) potentialDeps.push('Variables')
+      deps[name] = potentialDeps
+    }
+  })
+  return deps
 }
 
-const NODE_POSITIONS = {
-  'Variables': { x: 0.5, y: 0.08 },
-  'Data Types': { x: 0.25, y: 0.22 },
-  'Conditionals': { x: 0.75, y: 0.22 },
-  'Loops': { x: 0.5, y: 0.38 },
-  'Functions': { x: 0.2, y: 0.52 },
-  'Arrays': { x: 0.8, y: 0.52 },
-  'Recursion': { x: 0.2, y: 0.68 },
-  'Pointers': { x: 0.65, y: 0.68 },
-  'OOP': { x: 0.5, y: 0.80 },
-  'Time Complexity': { x: 0.5, y: 0.93 },
+function computeNodePositions(skillNames, dependencies) {
+  const depths = {}
+  
+  const getDepth = (name, visiting = new Set()) => {
+    if (name in depths) return depths[name]
+    if (visiting.has(name)) return 0
+    visiting.add(name)
+    
+    const deps = dependencies[name] || []
+    if (deps.length === 0) {
+      depths[name] = 0
+      return 0
+    }
+    
+    let maxDepDepth = 0
+    deps.forEach(dep => {
+      if (skillNames.includes(dep)) {
+        maxDepDepth = Math.max(maxDepDepth, getDepth(dep, visiting))
+      }
+    })
+    
+    depths[name] = maxDepDepth + 1
+    return depths[name]
+  }
+
+  skillNames.forEach(name => getDepth(name))
+
+  const levels = {}
+  skillNames.forEach(name => {
+    const d = depths[name] || 0
+    if (!levels[d]) levels[d] = []
+    levels[d].push(name)
+  })
+
+  const numLevels = Object.keys(levels).length
+  const positions = {}
+
+  Object.keys(levels).forEach((levelStr) => {
+    const level = parseInt(levelStr, 10)
+    const nodes = levels[level]
+    const numNodes = nodes.length
+    const y = 0.08 + (level / Math.max(1, numLevels - 1)) * 0.84
+
+    nodes.forEach((name, index) => {
+      let x = 0.5
+      if (numNodes > 1) {
+        x = 0.1 + (index / (numNodes - 1)) * 0.8
+      }
+      positions[name] = { x, y }
+    })
+  })
+
+  return positions
 }
 
 function getMasteryColor(mastery) {
@@ -74,7 +137,7 @@ function RadialProgress({ value, size = 80, color = '#FF6B35', label }) {
 }
 
 // ── Tab 1: Dashboard ──────────────────────────────────────────────────
-function DashboardTab({ skills, currentUser }) {
+function DashboardTab({ skills, currentUser, resumeProfile }) {
   const containerRef = useRef(null)
   const [dims, setDims] = useState({ w: 800, h: 600 })
   const [hoveredSkill, setHoveredSkill] = useState(null)
@@ -86,7 +149,7 @@ function DashboardTab({ skills, currentUser }) {
         if (data) {
           setStats({
             activity: data.activity || {},
-            zara: data.stats?.zara || { एग्जाम्सTaken: 0, totalScore: 0 },
+            zara: data.stats?.zara || { examsTaken: 0, totalScore: 0 },
             playground: data.stats?.playground || { totalRuns: 0, successRuns: 0 },
             courses: data.courses || {},
             completed: data.completed_courses || []
@@ -105,10 +168,17 @@ function DashboardTab({ skills, currentUser }) {
     return () => ro.disconnect()
   }, [])
 
-  const getPos = (name) => ({
-    x: NODE_POSITIONS[name].x * dims.w,
-    y: NODE_POSITIONS[name].y * dims.h,
-  })
+  const skillNames = Object.keys(skills || {})
+  const activeDeps = getDynamicDependencies(skillNames)
+  const activePositions = computeNodePositions(skillNames, activeDeps)
+
+  const getPos = (name) => {
+    const pos = activePositions[name] || { x: 0.5, y: 0.5 }
+    return {
+      x: pos.x * dims.w,
+      y: pos.y * dims.h,
+    }
+  }
 
   const skillList = Object.entries(skills)
   const avgMastery = Math.round(skillList.reduce((s, [, v]) => s + v.mastery, 0) / skillList.length) || 0
@@ -142,11 +212,19 @@ function DashboardTab({ skills, currentUser }) {
   return (
     <div className="space-y-6">
       {currentUser && (
-        <div className="glass-card px-6 py-4 border-l-4 border-l-purple-500 bg-purple-500/5 mb-4 rounded-lg">
-          <h2 className="text-xl font-display font-semibold text-white">
-            Welcome back, <span className="text-purple-400">{currentUser}</span>!
-          </h2>
-          <p className="text-sm font-mono tracking-wide text-white/50 mt-1">Here is your continuous learning progress.</p>
+        <div className="glass-card px-6 py-4 border-l-4 border-l-purple-500 bg-purple-500/5 mb-4 rounded-lg flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-display font-semibold text-white">
+              Welcome back, <span className="text-purple-400">{currentUser}</span>!
+            </h2>
+            <p className="text-sm font-mono tracking-wide text-white/50 mt-1">Here is your continuous learning progress.</p>
+          </div>
+          {resumeProfile?.targetRole && (
+            <div className="text-right">
+              <span className="text-xs font-mono uppercase tracking-wider text-cyan-400 block">Dream Role Target</span>
+              <span className="text-sm font-bold text-white block">{resumeProfile.targetRole}{resumeProfile.targetCompany ? ` @ ${resumeProfile.targetCompany}` : ''}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -194,8 +272,9 @@ function DashboardTab({ skills, currentUser }) {
           <div ref={containerRef} className="relative w-full" style={{ height: 460 }}>
             {/* Edges */}
             <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {Object.entries(DEPENDENCIES).map(([skill, deps]) =>
+              {Object.entries(activeDeps).map(([skill, deps]) =>
                 deps.map(dep => {
+                  if (!skillNames.includes(dep)) return null
                   const from = getPos(dep)
                   const to = getPos(skill)
                   const color = getMasteryColor(skills[dep]?.mastery || 0)
@@ -212,7 +291,7 @@ function DashboardTab({ skills, currentUser }) {
               )}
             </svg>
             {/* Nodes */}
-            {Object.entries(NODE_POSITIONS).map(([name]) => {
+            {skillNames.map((name) => {
               const skill = skills[name] || { mastery: 0, errorFreq: 0 }
               const pos = getPos(name)
               const color = getMasteryColor(skill.mastery)
@@ -326,7 +405,7 @@ function DashboardTab({ skills, currentUser }) {
 }
 
 // ── Tab 2: AI Predictions ─────────────────────────────────────────────
-function PredictionsTab({ skills }) {
+function PredictionsTab({ skills, resumeProfile }) {
   const [predictions, setPredictions] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -350,7 +429,7 @@ function PredictionsTab({ skills }) {
         const completedCourses = (JSON.parse(localStorage.getItem('code_obsidian_completed') || '[]')).length
 
         const prompt = `You are an AI learning analyst.
-Analyze this user's current skills and history, and predict their learning trajectory.
+Analyze this user's current skills and history, and predict their learning trajectory towards their dream role.
 
 Current Skills: ${JSON.stringify(skills)}
 History Snippet: ${historySummary}
@@ -358,6 +437,9 @@ Zara Practice Runs: ${zaraStats}
 Playground Code Runs: ${playgroundStats}
 Periodic Test Results: ${weeklyTests}
 Courses Enrolled/Completed: ${enrolledCourses}/${completedCourses}
+Target Company: ${resumeProfile?.targetCompany || 'Not specified'}
+Target Role: ${resumeProfile?.targetRole || 'Not specified'}
+User Resume Details: ${resumeProfile ? JSON.stringify({ name: resumeProfile.name, summary: resumeProfile.summary, skills: resumeProfile.skills }) : 'No resume uploaded yet'}
 
 Return EXACTLY this JSON format:
 {
@@ -366,12 +448,12 @@ Return EXACTLY this JSON format:
     { "skill": "SkillName2", "daysToMastery": 5, "confidence": "medium" }
   ],
   "learningPath": [
-    "Step 1 to take today based on weaknesses",
+    "Step 1 to take today based on weaknesses and target role",
     "Step 2 for tomorrow",
     "Step 3 for next week"
   ],
   "velocityStatus": "Accelerating | Steady | Needs Focus",
-  "insight": "One paragraph summarizing their learning trend and what they should focus on."
+  "insight": "One paragraph summarizing their learning trend, how it aligns with their target company/role, and what they should focus on."
 }`
 
         const resp = await callAI("You are an expert ML learning analyst. Output only valid JSON.", [{ role: 'user', content: prompt }])
@@ -380,21 +462,38 @@ Return EXACTLY this JSON format:
         if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/```json?\n?/, '').replace(/```$/, '').trim()
         setPredictions(JSON.parse(jsonStr))
       } catch (err) {
+        // Dynamic fallback based on user's actual skills:
+        const skillList = Object.entries(skills || {})
+        const weak = skillList.filter(([, s]) => s.mastery < 50).sort((a, b) => a[1].mastery - b[1].mastery).slice(0, 3)
+        const projected = weak.map(([name, s]) => ({
+          skill: name,
+          daysToMastery: Math.max(2, Math.round((100 - s.mastery) / 15)),
+          confidence: s.mastery > 30 ? 'medium' : 'low'
+        }))
+        // If no weak skills, project based on top skills
+        if (projected.length === 0) {
+          projected.push(
+            { skill: skillList[0]?.[0] || 'Variables', daysToMastery: 2, confidence: 'high' },
+            { skill: skillList[1]?.[0] || 'Functions', daysToMastery: 3, confidence: 'high' }
+          )
+        }
+
         setPredictions({
-          projectedMastery: [
-            { skill: 'Variables', daysToMastery: 1, confidence: 'high' },
-            { skill: 'Functions', daysToMastery: 4, confidence: 'medium' }
+          projectedMastery: projected,
+          learningPath: [
+            `Focus on strengthening ${projected[0]?.skill || 'foundational concepts'} by completing interactive challenges.`,
+            `Build a small hands-on project integrating ${projected[1]?.skill || 'core functions'}.`,
+            `Take a mock assessment with Examiner Zara to test your comprehension.`
           ],
-          learningPath: ["Practice basic syntax", "Build a small project", "Review advanced topics"],
           velocityStatus: "Steady",
-          insight: "Keep practicing consistently to improve your mastery."
+          insight: `Based on your profile, you are making progress. Focus on ${projected.map(p => p.skill).join(', ')} to bridge key knowledge gaps.`
         })
       } finally {
         setLoading(false)
       }
     }
     fetchPredictions()
-  }, [skills])
+  }, [skills, resumeProfile])
 
   if (loading) {
     return (
@@ -601,7 +700,7 @@ function TestsTab({ onSkillUpdate }) {
 
 
 // ── Main Layout ───────────────────────────────────────────────────────
-export default function SkillTrack({ skills, onSkillUpdate, currentUser }) {
+export default function SkillTrack({ skills, onSkillUpdate, currentUser, resumeProfile }) {
   const [activeTab, setActiveTab] = useState('dashboard') // dashboard | predictions | mentor | tests
   const [completedCourses, setCompletedCourses] = useState([])
 
@@ -656,8 +755,8 @@ export default function SkillTrack({ skills, onSkillUpdate, currentUser }) {
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.2 }}
         >
-          {activeTab === 'dashboard' && <DashboardTab skills={skills} currentUser={currentUser} />}
-          {activeTab === 'predictions' && <PredictionsTab skills={skills} />}
+          {activeTab === 'dashboard' && <DashboardTab skills={skills} currentUser={currentUser} resumeProfile={resumeProfile} />}
+          {activeTab === 'predictions' && <PredictionsTab skills={skills} resumeProfile={resumeProfile} />}
           {activeTab === 'mentor' && <MentorTab skills={skills} courses={completedCourses} />}
           {activeTab === 'tests' && <TestsTab onSkillUpdate={onSkillUpdate} />}
         </motion.div>

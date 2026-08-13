@@ -64,8 +64,8 @@ export default function SkillGraph({ skills }) {
   })
 
   // Compute gap detection
-  const weakSkills = Object.entries(skills)
-    .filter(([, s]) => s.mastery < 40)
+  const weakSkills = Object.entries(skills || {})
+    .filter(([, s]) => s && typeof s.mastery === 'number' && s.mastery < 40)
     .sort((a, b) => a[1].mastery - b[1].mastery)
     .slice(0, 3)
 
@@ -202,7 +202,8 @@ export default function SkillGraph({ skills }) {
         {/* Skill list panel */}
         <div className="space-y-3">
           <h3 className="font-semibold text-white/70 text-sm">All Skills</h3>
-          {Object.entries(skills)
+          {Object.entries(skills || {})
+            .filter(([, s]) => s && typeof s.mastery === 'number')
             .sort((a, b) => b[1].mastery - a[1].mastery)
             .map(([name, skill]) => {
               const color = getMasteryColor(skill.mastery)

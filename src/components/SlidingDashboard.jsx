@@ -40,8 +40,9 @@ export default function SlidingDashboard({ skills, onNavigate, isOpen, onClose }
   const [tab, setTab] = useState('skills')
   const overall = getOverallProgress(skills)
   const nextSkill = suggestNextSkill(skills)
-  const allSkills = Object.entries(skills).sort((a, b) => b[1].mastery - a[1].mastery)
-  const weakSkills = Object.entries(skills).sort((a, b) => a[1].mastery - b[1].mastery).slice(0, 4)
+  const cleanSkills = Object.entries(skills || {}).filter(([, d]) => d && typeof d.mastery === 'number')
+  const allSkills = [...cleanSkills].sort((a, b) => b[1].mastery - a[1].mastery)
+  const weakSkills = [...cleanSkills].sort((a, b) => a[1].mastery - b[1].mastery).slice(0, 4)
   const ringColor = overall >= 70 ? '#22c55e' : overall >= 45 ? '#eab308' : '#FF6B35'
 
   const ACTIVITIES = [
@@ -101,7 +102,7 @@ export default function SlidingDashboard({ skills, onNavigate, isOpen, onClose }
                     {overall >= 70 ? 'Strong progress 🔥' : overall >= 45 ? 'Keep going 💪' : 'Just starting 🌱'}
                   </div>
                   <div style={{ display: 'flex', gap: 2, marginTop: 8 }}>
-                    {Object.values(skills).map((s, i) => (
+                    {Object.values(skills || {}).filter(s => s && typeof s.mastery === 'number').map((s, i) => (
                       <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, opacity: 0.65, background: s.mastery >= 70 ? '#22c55e' : s.mastery >= 45 ? '#eab308' : '#ef4444' }} />
                     ))}
                   </div>

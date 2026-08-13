@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import DragonCursor from './DragonCursor';
+import DotField from './DotField';
 import { dbService } from '../dbService';
+import { User, Lock } from 'lucide-react';
 
 export default function Login({ onLoginSuccess }) {
     const [isLogin, setIsLogin] = useState(true);
@@ -48,33 +49,55 @@ export default function Login({ onLoginSuccess }) {
     };
 
     return (
-        <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-[#0a0a0c] font-sans selection:bg-purple-500/30">
+        <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-[#070709] font-sans selection:bg-purple-500/30">
 
-            {/* 1. Custom Dragon Cursor ONLY active on this route */}
-            <DragonCursor />
-
-            {/* 2. Abstract dark background elements */}
+            {/* 1. DotField Background */}
             <div className="absolute inset-0 z-0">
-                <div className="absolute top-[20%] left-[20%] w-[30vw] h-[30vw] min-w-[300px] min-h-[300px] bg-purple-900/20 rounded-full blur-[120px] mix-blend-screen" />
-                <div className="absolute bottom-[20%] right-[20%] w-[25vw] h-[25vw] min-w-[250px] min-h-[250px] bg-red-900/10 rounded-full blur-[100px] mix-blend-screen" />
-                {/* Subtle grid pattern */}
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PHBhdGggZD0iTTAgMGg0MHY0MEgwVjB6bTIwIDIwYzAgMTEuMDQ2IDguOTU0IDIwIDIwIDIwczIwLTguOTU0IDIwLTIwUzMxLjA0NiAwIDIwIDBDOC45NTQgMCAwIDguOTU0IDAgMjB6IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDIiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjwvc3ZnPg==')] opacity-[0.15]" />
+                <DotField
+                    dotRadius={1.5}
+                    dotSpacing={14}
+                    bulgeStrength={67}
+                    glowRadius={160}
+                    sparkle={false}
+                    waveAmplitude={0}
+                    cursorRadius={500}
+                    cursorForce={0.1}
+                    bulgeOnly
+                    gradientFrom="#A855F7"
+                    gradientTo="#B497CF"
+                    glowColor="#120F17"
+                />
             </div>
 
-            {/* 3. Main Glass Auth Container */}
+            {/* 2. Main Glass Auth Container */}
             <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                className="relative z-10 w-full max-w-[400px] mx-4"
+                className="relative z-10 w-full max-w-[420px] mx-4"
             >
-                <div className="backdrop-blur-2xl bg-black/40 border border-white/10 rounded-[2rem] p-10 shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden">
+                <div className="backdrop-blur-2xl bg-black/50 border border-white/10 rounded-[2rem] p-10 shadow-[0_0_50px_rgba(168,85,247,0.15)] overflow-hidden">
 
                     {/* Top glowing accent */}
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-purple-500/50 to-transparent" />
 
+                    {/* Brand Logo/Icon */}
+                    <div className="flex justify-center mb-6">
+                        <div className="relative group">
+                            <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-fuchsia-500 to-indigo-500 rounded-2xl blur-lg opacity-40 group-hover:opacity-75 transition-all duration-500" />
+                            <div className="relative w-14 h-14 rounded-2xl bg-[#0d0d12]/95 border border-white/15 flex items-center justify-center shadow-inner">
+                                <svg className="w-8 h-8 text-purple-400 group-hover:scale-110 transition-transform duration-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                    <polygon points="12 2 2 12 12 22 22 12" className="fill-purple-500/10" />
+                                    <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="3 3" />
+                                    <line x1="2" y1="12" x2="22" y2="12" strokeDasharray="3 3" />
+                                    <circle cx="12" cy="12" r="3" className="fill-purple-500 stroke-purple-300" />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Header */}
-                    <div className="text-center mb-10">
+                    <div className="text-center mb-8">
                         <h1 className="text-3xl font-display font-bold text-white tracking-tight mb-2">
                             {isLogin ? 'Welcome Back' : 'Create Account'}
                         </h1>
@@ -88,15 +111,20 @@ export default function Login({ onLoginSuccess }) {
                             <label className="text-[11px] font-mono text-white/50 uppercase tracking-widest pl-1">
                                 Username
                             </label>
-                            <input
-                                type="text"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                autoComplete="off"
-                                spellCheck="false"
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all font-mono text-sm"
-                                placeholder="dragon_slayer_99"
-                            />
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-white/30">
+                                    <User className="w-4 h-4" />
+                                </span>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    autoComplete="off"
+                                    spellCheck="false"
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all font-mono text-sm"
+                                    placeholder="dragon_slayer_99"
+                                />
+                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -106,13 +134,18 @@ export default function Login({ onLoginSuccess }) {
                                 </label>
                                 {isLogin && <a href="#" className="text-[11px] font-mono text-purple-400 hover:text-purple-300 transition-colors">Forgot?</a>}
                             </div>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all font-mono text-sm tracking-widest"
-                                placeholder="••••••••"
-                            />
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-white/30">
+                                    <Lock className="w-4 h-4" />
+                                </span>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all font-mono text-sm tracking-widest"
+                                    placeholder="••••••••"
+                                />
+                            </div>
                         </div>
 
                         {/* Error / Success Messages */}
@@ -143,11 +176,11 @@ export default function Login({ onLoginSuccess }) {
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             disabled={isLoading}
-                            className="w-full relative group overflow-hidden rounded-xl bg-white text-black font-bold py-4 transition-all hover:bg-white/90 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
+                            className="w-full relative group overflow-hidden rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-4 transition-all hover:opacity-95 disabled:opacity-70 disabled:cursor-not-allowed mt-2 shadow-[0_0_20px_rgba(168,85,247,0.3)] hover:shadow-[0_0_30px_rgba(168,85,247,0.5)]"
                         >
                             {isLoading ? (
                                 <div className="flex items-center justify-center gap-2">
-                                    <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                     <span className="font-mono text-sm tracking-widest uppercase">{isLogin ? 'Authenticating' : 'Registering'}</span>
                                 </div>
                             ) : (
@@ -168,7 +201,7 @@ export default function Login({ onLoginSuccess }) {
                             className="text-sm font-medium text-white/50 hover:text-white transition-colors"
                         >
                             {isLogin ? "Don't have an account? " : "Already have an account? "}
-                            <span className="text-purple-400 border-b border-transparent hover:border-purple-400 transition-colors pb-0.5">
+                            <span className="text-purple-400 border-b border-transparent hover:border-purple-400 transition-colors pb-0.5 font-semibold">
                                 {isLogin ? "Register" : "Login"}
                             </span>
                         </button>

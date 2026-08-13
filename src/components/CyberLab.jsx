@@ -1,665 +1,747 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Terminal, Zap, Globe, Lock, Search, Save, Send, AlertTriangle, Code, Play, RefreshCw, CheckCircle, Flame, Info, Bug } from 'lucide-react';
+import Editor, { DiffEditor } from '@monaco-editor/react';
+import { 
+  Shield, Terminal, Play, RefreshCw, CheckCircle, Flame, 
+  AlertTriangle, Bug, Code, Lock, ShieldCheck, Cpu, ArrowRight, Info,
+  ChevronUp, ChevronDown
+} from 'lucide-react';
 
 const SCENARIOS = [
-    {
-        id: 'sqli',
-        title: 'SQL Injection',
-        target: 'SecureBank Login API',
-        difficulty: 'Beginner',
-        hint: 'Hint: try manipulating the query logic.',
-        type: 'login',
-        defaultPath: 'POST /api/v1/auth/login'
-    },
-    {
-        id: 'xss',
-        title: 'XSS',
-        target: 'BlogPost Comment System',
-        difficulty: 'Apprentice',
-        hint: 'Hint: what if the input is treated as code?',
-        type: 'comment',
-        defaultPath: 'POST /api/v2/comments/add'
-    },
-    {
-        id: 'cmd',
-        title: 'Command Injection',
-        target: 'FileServer Utility',
-        difficulty: 'Operator',
-        hint: 'Hint: can you chain commands?',
-        type: 'command',
-        defaultPath: 'GET /api/v1/utils/ping?host='
-    },
-    {
-        id: 'jwt',
-        title: 'Auth Bypass',
-        target: 'AdminPanel JWT Auth',
-        difficulty: 'Expert',
-        hint: 'Hint: what if you modify the token?',
-        type: 'token',
-        defaultPath: 'GET /api/v1/admin/dashboard'
-    },
-    {
-        id: 'api',
-        title: 'API Exploitation',
-        target: 'UserData API',
-        difficulty: 'Operator',
-        hint: 'Hint: what happens with unexpected values?',
-        type: 'api',
-        defaultPath: 'GET /api/v3/users/{id}'
-    }
+  {
+    id: 'sqli',
+    title: 'SQL Injection',
+    subtitle: 'Authentication Bypass',
+    owasp: 'A03:2021-Injection',
+    targetApp: 'SecureBank Admin Portal',
+    defaultPayload: `' OR '1'='1' --`,
+    presetPayloads: [
+      { label: "Admin Bypass", payload: `' OR '1'='1' --` },
+      { label: "Union Data Leak", payload: `' UNION SELECT id, username, password, role, balance FROM users --` },
+      { label: "Stacking Comment", payload: `admin' #` }
+    ],
+    vulnerableSnippet: `// VULNERABLE ROUTE (SQL Injection)
+app.post('/cyberlab/sqli/vulnerable', (req, res) => {
+  const { username, password } = req.body;
+  
+  // Line 6: Direct string concatenation allows input to mutate SQL logic!
+  const query = \`SELECT * FROM users WHERE username = '\${username}' AND password = '\${password}'\`;
+  
+  const results = db.prepare(query).all();
+  res.json({ query, results, rowCount: results.length });
+});`,
+    fixedSnippet: `// FIXED ROUTE (Parameterized Queries)
+app.post('/cyberlab/sqli/fixed', (req, res) => {
+  const { username, password } = req.body;
+  
+  // Line 6: Parameterized prepared statement treats input strictly as literal values
+  const stmt = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?');
+  const results = stmt.all(username || '', password || '');
+  
+  res.json({ query: stmt.source, params: [username, password], results, rowCount: results.length });
+});`
+  },
+  {
+    id: 'xss',
+    title: 'Stored XSS',
+    subtitle: 'Script Injection in Guestbook',
+    owasp: 'A03:2021-Injection (Cross-Site Scripting)',
+    targetApp: 'DevPortal Community Guestbook',
+    defaultPayload: `<script>document.body.style.background='red'; alert('PWNED!');</script>`,
+    presetPayloads: [
+      { label: "Inline Script", payload: `<script>alert('XSS Executed!')</script>` },
+      { label: "Image OnError", payload: `<img src="invalid" onerror="alert('Image XSS Triggered!')" />` },
+      { label: "DOM Defacement", payload: `<h1 style="color:cyan;font-size:24px">HACKED BY XSS</h1>` }
+    ],
+    vulnerableSnippet: `// VULNERABLE ROUTE (Stored XSS)
+app.post('/cyberlab/xss/vulnerable', (req, res) => {
+  const { author, comment } = req.body;
+  
+  // Line 6: Input saved and rendered raw to HTML response without sanitization!
+  db.prepare('INSERT INTO comments (author, content) VALUES (?, ?)').run(author, comment);
+  const comments = db.prepare('SELECT * FROM comments ORDER BY id DESC').all();
+  
+  const html = renderCommentsPage(comments, /* escape */ false);
+  res.json({ html, commentCount: comments.length });
+});`,
+    fixedSnippet: `// FIXED ROUTE (HTML Entity Escaping)
+app.post('/cyberlab/xss/fixed', (req, res) => {
+  const { author, comment } = req.body;
+  
+  // Line 6: HTML escaping converts '<' to '&lt;' so scripts render safely as plain text
+  const comments = db.prepare('SELECT * FROM comments ORDER BY id DESC').all();
+  const allComments = [{ author, content: comment }, ...comments];
+  
+  const html = renderCommentsPage(allComments, /* escape */ true);
+  res.json({ html, commentCount: allComments.length });
+});`
+  }
 ];
 
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
-
 export default function CyberLab({ currentUser, onSkillUpdate, skills }) {
-    const [activeScenario, setActiveScenario] = useState(SCENARIOS[0]);
+  const [activeScenario, setActiveScenario] = useState(SCENARIOS[0]);
+  const [payload, setPayload] = useState(SCENARIOS[0].defaultPayload);
+  const [xssAuthor, setXssAuthor] = useState('Attacker');
+  const [sqliUsername, setSqliUsername] = useState(`admin' OR '1'='1' --`);
+  const [sqliPassword, setSqliPassword] = useState('anything');
 
-    // Engine & Request State
-    const [isLoadingEngine, setIsLoadingEngine] = useState(false);
-    const [lastEngineResponse, setLastEngineResponse] = useState(null);
-    const [requestPayload, setRequestPayload] = useState('');
-    const [responsePayload, setResponsePayload] = useState('');
-    const [statusCode, setStatusCode] = useState(null);
-    const [isExploit, setIsExploit] = useState(false);
-    const [vulnerabilityType, setVulnerabilityType] = useState('');
-    const [technicalDetail, setTechnicalDetail] = useState('');
+  // Execution States
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [attackResult, setAttackResult] = useState(null);
+  const [xssIframeHtml, setXssIframeHtml] = useState('');
+  
+  // AI Explanation State
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
 
-    // Cyber Sage State
-    const [sageMessages, setSageMessages] = useState([
-        { role: 'assistant', content: "Welcome to the attack simulator. I am Cyber Sage. Select a scenario above to begin. Remember, a hacker observes first, then attacks. What's your first move?" }
-    ]);
-    const [sageInput, setSageInput] = useState('');
-    const [isSageTyping, setIsSageTyping] = useState(false);
-    const chatEndRef = useRef(null);
-    const [showConfetti, setShowConfetti] = useState(false);
+  // Fix Verification State
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [fixResult, setFixResult] = useState(null);
+  const [showDiffDrawer, setShowDiffDrawer] = useState(false);
 
-    // Auto-scroll chat
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [sageMessages, isSageTyping]);
+  // Completion Track
+  const [completedScenarios, setCompletedScenarios] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('code_obsidian_cyberlab_completed') || '{}');
+    } catch {
+      return {};
+    }
+  });
 
-    // Cleanup & Reset on Scenario Change
-    useEffect(() => {
-        setLastEngineResponse(null);
-        setRequestPayload('');
-        setResponsePayload('');
-        setStatusCode(null);
-        setIsExploit(false);
-        setVulnerabilityType('');
-        setTechnicalDetail('');
-        setShowConfetti(false);
-        // Add sage message about scenario change
-        setSageMessages(prev => [...prev, {
-            role: 'assistant',
-            content: `We've switched targets to ${activeScenario.target}. ${activeScenario.hint} What are you noticing about the input?`
-        }]);
-    }, [activeScenario]);
+  // Switch scenario resets state
+  const handleSelectScenario = (scenario) => {
+    setActiveScenario(scenario);
+    setPayload(scenario.defaultPayload);
+    if (scenario.id === 'sqli') {
+      setSqliUsername(scenario.defaultPayload);
+      setSqliPassword('anything');
+    } else {
+      setPayload(scenario.defaultPayload);
+    }
+    setAttackResult(null);
+    setXssIframeHtml('');
+    setAiAnalysis(null);
+    setAiError(null);
+    setFixResult(null);
+  };
 
-    const callGroqAPI = async (system, messages) => {
-        const res = await fetch('http://localhost:3001/api/groq', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'llama-3.1-8b-instant', // Fast model for simulated responses
-                max_tokens: 1024,
-                system: system,
-                messages: messages,
-            })
-        });
-        if (!res.ok) {
-            const err = await res.text();
-            throw new Error(`API Error: ${res.status} - ${err}`);
-        }
-        return res.json();
+  // ── Step 1 & 2: Run Attack against Vulnerable Endpoint ────────────────────
+  const handleRunAttack = async () => {
+    setIsExecuting(true);
+    setAttackResult(null);
+    setAiAnalysis(null);
+    setAiError(null);
+    setFixResult(null);
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-cyberlab-user': currentUser || 'anonymous'
     };
 
-    const handleSimulatorSubmit = async (inputData) => {
-        if (!inputData || isLoadingEngine) return;
+    let bodyData = {};
+    let endpoint = '';
 
-        setIsLoadingEngine(true);
-        setIsExploit(false);
-        setResponsePayload('');
-        setTechnicalDetail('');
+    if (activeScenario.id === 'sqli') {
+      endpoint = '/cyberlab/sqli/vulnerable';
+      bodyData = { username: sqliUsername, password: sqliPassword };
+    } else {
+      endpoint = '/cyberlab/xss/vulnerable';
+      bodyData = { author: xssAuthor, comment: payload };
+    }
 
-        // Build system prompt for simulator
-        const simSystem = `You are a vulnerable web application simulator for cybersecurity education. When given a user input/payload and a scenario type, simulate exactly how a real vulnerable backend would respond. 
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bodyData)
+      });
 
-Return a JSON object with these fields:
-- "response": the simulated server response text shown to the user
-- "statusCode": HTTP status code (200, 401, 403, 500, etc.)
-- "isExploit": boolean — true if the input successfully exploits a vulnerability
-- "vulnerabilityType": if exploit, name it (e.g. "SQL Injection", "XSS", "Command Injection")
-- "technicalDetail": brief technical explanation of what happened internally (e.g. "Query became: SELECT * FROM users WHERE username='' OR '1'='1'")
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Server returned HTTP ${res.status}: ${errText}`);
+      }
 
-Be realistic. Common SQL injection payloads like admin' OR '1'='1 should work. XSS payloads with <script> tags should reflect. Command injection with ; ls or && whoami should return fake directory listings. Auth bypass with manipulated JWTs should succeed. Return ONLY valid JSON, no markdown.`;
+      const data = await res.json();
+      setAttackResult(data);
 
-        const userMsg = `Scenario: ${activeScenario.title} (${activeScenario.target})
-Input Payload: ${JSON.stringify(inputData)}`;
+      if (activeScenario.id === 'xss' && data.html) {
+        setXssIframeHtml(data.html);
+      }
 
-        setRequestPayload(JSON.stringify(inputData, null, 2));
+      // Automatically trigger AI Explanation Layer ONLY if exploit succeeded
+      if (data.exploited) {
+        triggerAiExplanation(bodyData, data);
+      } else {
+        setAiAnalysis(null); // Clear stale AI analysis state on benign/failed attempts!
+      }
+    } catch (err) {
+      console.error('Attack execution error:', err);
+      setAttackResult({ error: err.message });
+    } finally {
+      setIsExecuting(false);
+    }
+  };
 
-        try {
-            const data = await callGroqAPI(simSystem, [{ role: 'user', content: userMsg }]);
-            let textRes = data.choices?.[0]?.message?.content || '{}';
+  // ── Step 3: AI Explanation Layer (Calls Groq via server proxy or client) ──
+  const triggerAiExplanation = async (inputPayload, rawResponse) => {
+    setIsAiLoading(true);
+    setAiError(null);
 
-            // Clean markdown if any robustly by finding exact JSON boundaries
-            const startIdx = textRes.indexOf('{');
-            const endIdx = textRes.lastIndexOf('}');
+    const systemPrompt = `You are a Senior Cybersecurity Engineer explaining vulnerability mechanics for Code Obsidian Cyber Lab.
+Analyze the provided exploit attempt against a vulnerable code snippet and raw response.
+Return ONLY valid JSON matching this exact structure:
+{
+  "vulnerableLine": 6,
+  "owaspCategory": "${activeScenario.owasp}",
+  "explanation": "Clear, concise, plain-language explanation of why this payload worked and what happened inside the DB/DOM.",
+  "fixedCode": ${JSON.stringify(activeScenario.fixedSnippet)}
+}`;
 
-            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-                textRes = textRes.substring(startIdx, endIdx + 1);
-            }
+    const userMessage = `Scenario: ${activeScenario.title} (${activeScenario.targetApp})
+User Payload / Input: ${JSON.stringify(inputPayload)}
+Raw Endpoint Response: ${JSON.stringify(rawResponse)}
+Vulnerable Source Code:
+${activeScenario.vulnerableSnippet}`;
 
-            // Scrub unescaped control characters like newlines within strings before parsing
-            // textRes = textRes.replace(/\\n/g, '\\\\n').replace(/\\r/g, '\\\\r'); // Wait, let's just delete the block
+    try {
+      const groqRes = await fetch('/api/groq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }]
+        })
+      });
 
-            const result = JSON.parse(textRes);
+      if (!groqRes.ok) {
+        throw new Error(`AI Service status ${groqRes.status}`);
+      }
 
-            setResponsePayload(result.response);
-            setStatusCode(result.statusCode);
-            setIsExploit(result.isExploit);
-            if (result.isExploit) {
-                setVulnerabilityType(result.vulnerabilityType);
-                setTechnicalDetail(result.technicalDetail);
-                setShowConfetti(true);
-                setTimeout(() => setShowConfetti(false), 3000);
+      const groqData = await groqRes.json();
+      let textContent = groqData.choices?.[0]?.message?.content || '{}';
 
-                // Trigger Sage auto-message for exploit success
-                handleSageAutoResponse(result);
-            } else {
-                // Not an exploit, subtle hint from sage occasionally
-                if (Math.random() > 0.5) {
-                    handleSageHint(result);
-                }
-            }
-        } catch (err) {
-            console.error('Simulation error:', err);
-            setResponsePayload('Error reaching simulation engine: ' + err.message);
-            setStatusCode(500);
-        } finally {
-            setIsLoadingEngine(false);
-        }
+      const firstBrace = textContent.indexOf('{');
+      const lastBrace = textContent.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        textContent = textContent.substring(firstBrace, lastBrace + 1);
+      }
+
+      const parsed = JSON.parse(textContent);
+      setAiAnalysis(parsed);
+    } catch (err) {
+      console.error('AI analysis error:', err);
+      // Fallback deterministic AI response if API fails
+      setAiAnalysis({
+        vulnerableLine: 6,
+        owaspCategory: activeScenario.owasp,
+        explanation: activeScenario.id === 'sqli'
+          ? "The payload injected raw SQL syntax into the query string. By adding `' OR '1'='1' --`, the boolean expression evaluated to true for all rows, and `--` commented out the remaining password clause."
+          : "The application inserted user input directly into HTML without escaping string literals. Browser interpreted the `<script>` tag as executable JavaScript inside the DOM.",
+        fixedCode: activeScenario.fixedSnippet
+      });
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // ── Step 4: Verify the Fix against Secured Endpoint ─────────────────────
+  const handleVerifyFix = async () => {
+    setIsVerifying(true);
+    setFixResult(null);
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-cyberlab-user': currentUser || 'anonymous'
     };
 
-    const handleSageHint = async (simResult) => {
-        setIsSageTyping(true);
-        const sageSystem = `You are Cyber Sage, a cybersecurity mentor. Guide users through hacking simulations with hints and Socratic questions. Never give direct answers. Be encouraging. Use cybersecurity terminology. 
-Output your response as a valid JSON object with a single lowercase "response" key: {"response": "..."}`;
+    let bodyData = {};
+    let endpoint = '';
 
-        const contextMsg = `The user tried an input on the ${activeScenario.title} scenario but it failed. The server responded with ${simResult.statusCode}. Can you give a brief, subtle 1-2 sentence hint?`;
+    if (activeScenario.id === 'sqli') {
+      endpoint = '/cyberlab/sqli/fixed';
+      bodyData = { username: sqliUsername, password: sqliPassword };
+    } else {
+      endpoint = '/cyberlab/xss/fixed';
+      bodyData = { author: xssAuthor, comment: payload };
+    }
 
-        try {
-            const data = await callGroqAPI(sageSystem, [
-                ...sageMessages.slice(-5), // keep small context window
-                { role: 'user', content: contextMsg }
-            ]);
-            let textRes = data.choices?.[0]?.message?.content || '{"response": "Connection lost."}';
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bodyData)
+      });
 
-            // Clean markdown if any robustly by finding exact JSON boundaries
-            const startIdx = textRes.indexOf('{');
-            const endIdx = textRes.lastIndexOf('}');
-            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-                textRes = textRes.substring(startIdx, endIdx + 1);
-            }
-            const result = JSON.parse(textRes);
+      const data = await res.json();
+      setFixResult(data);
 
-            setSageMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
-        } catch (e) {
-            console.error('Sage hint error:', e);
-        } finally {
-            setIsSageTyping(true); // wait we need it false
-            setIsSageTyping(false);
-        }
-    };
+      if (activeScenario.id === 'xss' && data.html) {
+        setXssIframeHtml(data.html);
+      }
 
-    const handleSageAutoResponse = async (result) => {
-        setIsSageTyping(true);
-        const sageSystem = `You are Cyber Sage, a cybersecurity mentor. Guide users through hacking simulations. After successful exploits, explain: what the vulnerability was, why it worked, what was vulnerable, and how to fix it. Be encouraging. Use cybersecurity terminology. Keep it structured but conversational. 
-Output your response as a valid JSON object with a single lowercase "response" key: {"response": "..."}`;
+      // Mark scenario as completed & update skill graph
+      const updated = { ...completedScenarios, [activeScenario.id]: true };
+      setCompletedScenarios(updated);
+      localStorage.setItem('code_obsidian_cyberlab_completed', JSON.stringify(updated));
 
-        const contextMsg = `The user successfully exploited the ${activeScenario.title} scenario! 
-Vulnerability Type: ${result.vulnerabilityType}
-Technical Detail: ${result.technicalDetail}
-Respond with an explanation of what they just did, why it worked, and how to fix it in actual code. Complete the mission!`;
+      if (onSkillUpdate) {
+        onSkillUpdate('Web Hacking', 5);
+      }
+    } catch (err) {
+      console.error('Verify fix error:', err);
+      setFixResult({ error: err.message });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
-        try {
-            const data = await callGroqAPI(sageSystem, [
-                ...sageMessages.slice(-5),
-                { role: 'user', content: contextMsg }
-            ]);
-            let textRes = data.choices?.[0]?.message?.content || '{"response": "Connection lost."}';
-            const startIdx = textRes.indexOf('{');
-            const endIdx = textRes.lastIndexOf('}');
-            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-                textRes = textRes.substring(startIdx, endIdx + 1);
-            }
-            const parsed = JSON.parse(textRes);
+  // ── Step 5: Reset Sandbox Endpoint ───────────────────────────────────────
+  const handleResetSandbox = async () => {
+    try {
+      await fetch(`/cyberlab/reset/${activeScenario.id}`, {
+        method: 'POST',
+        headers: { 'x-cyberlab-user': currentUser || 'anonymous' }
+      });
+      handleSelectScenario(activeScenario);
+    } catch (err) {
+      console.error('Reset error:', err);
+    }
+  };
 
-            setSageMessages(prev => [...prev, { role: 'assistant', content: parsed.response }]);
-        } catch (e) {
-            console.error('Sage auto error:', e);
-        } finally {
-            setIsSageTyping(false);
-        }
-    };
-
-    const handleSageUserSubmit = async (e) => {
-        e.preventDefault();
-        if (!sageInput.trim() || isSageTyping) return;
-
-        const newUserMsg = { role: 'user', content: sageInput };
-        setSageMessages(prev => [...prev, newUserMsg]);
-        setSageInput('');
-        setIsSageTyping(true);
-
-        const sageSystem = `You are Cyber Sage, a cybersecurity mentor. Guide users through hacking simulations with hints and Socratic questions. Never give direct answers. Be encouraging. Use cybersecurity terminology. Current scenario: ${activeScenario.title} (${activeScenario.target}). 
-Output your response as a valid JSON object with a single lowercase "response" key: {"response": "..."}`;
-
-        try {
-            const data = await callGroqAPI(sageSystem, [...sageMessages, newUserMsg]);
-            let textRes = data.choices?.[0]?.message?.content || '{"response": "Connection lost."}';
-            const startIdx = textRes.indexOf('{');
-            const endIdx = textRes.lastIndexOf('}');
-            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-                textRes = textRes.substring(startIdx, endIdx + 1);
-            }
-            const parsed = JSON.parse(textRes);
-
-            setSageMessages(prev => [...prev, { role: 'assistant', content: parsed.response }]);
-        } catch (e) {
-            console.error('Sage error:', e);
-            setSageMessages(prev => [...prev, { role: 'assistant', content: "My connection to the mainframe was interrupted. Try that again." }]);
-        } finally {
-            setIsSageTyping(false);
-        }
-    };
-
-    // Components for the Target Interface
-    const TargetForm = () => {
-        const [formData, setFormData] = useState({});
-
-        const onSubmit = (e) => {
-            e.preventDefault();
-            const form = new FormData(e.target);
-            const data = Object.fromEntries(form.entries());
-            // Fallback to React state formData for fields not picked up by native form
-            handleSimulatorSubmit({ ...formData, ...data });
-        };
-
-        return (
-            <div className="flex flex-col h-full bg-[#0a0a0f] text-white overflow-y-auto">
-                <div className="p-6 border-b border-white/5 relative z-10">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                            <Shield className="w-5 h-5 text-orange-500" />
-                            <h2 className="text-xl font-black">{activeScenario.title}</h2>
-                        </div>
-                        <span className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs font-mono text-cyan-400 capitalize">
-                            {activeScenario.difficulty}
-                        </span>
-                    </div>
-                    <p className="text-sm text-white/60 mb-2 font-mono">{activeScenario.target}</p>
-                    <p className="text-xs text-orange-400/80 italic font-mono bg-orange-500/5 p-2 rounded border border-orange-500/10">
-                        {activeScenario.hint}
-                    </p>
-                </div>
-
-                <div className="flex-1 p-6 flex flex-col items-center justify-center relative">
-                    <AnimatePresence>
-                        {isExploit && (
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute top-4 left-4 right-4 bg-green-500/10 border border-green-500/50 rounded-xl p-4 shadow-[0_0_30px_rgba(0,255,136,0.2)] z-20"
-                            >
-                                <div className="flex items-center gap-3 justify-center text-green-400 font-black uppercase tracking-widest text-lg">
-                                    <Flame className="w-6 h-6 animate-pulse" />
-                                    Vulnerability Detected
-                                </div>
-                                <div className="text-center font-mono text-xs text-green-400/80 mt-2">
-                                    [{vulnerabilityType}]
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-
-                    {/* Scanlines effect overlay */}
-                    <div className="absolute inset-0 pointer-events-none opacity-5 bg-[linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0.5)_50%,rgba(255,255,255,0))] bg-[length:100%_4px] mix-blend-overlay z-0"></div>
-
-                    <form onSubmit={onSubmit} className={`w-full max-w-sm glass-card p-8 rounded-2xl border ${isExploit ? 'border-green-500/30 bg-green-500/5 shadow-[0_0_50px_rgba(0,255,136,0.1)]' : 'border-cyan-500/20 bg-black/40 shadow-2xl'} relative z-10 transition-all duration-500`}>
-                        {activeScenario.type === 'login' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">Username</label>
-                                    <input
-                                        type="text"
-                                        name="username"
-                                        onChange={e => setFormData({ ...formData, username: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner"
-                                        placeholder="Enter username"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">Password</label>
-                                    <input
-                                        type="password"
-                                        name="password"
-                                        onChange={e => setFormData({ ...formData, password: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner"
-                                        placeholder="••••••••"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeScenario.type === 'comment' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">Add Comment</label>
-                                    <textarea
-                                        rows="4"
-                                        name="comment"
-                                        onChange={e => setFormData({ ...formData, comment: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner resize-none"
-                                        placeholder="<b>Awesome post!</b>"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeScenario.type === 'command' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">Host to Ping</label>
-                                    <input
-                                        type="text"
-                                        name="host"
-                                        onChange={e => setFormData({ ...formData, host: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner"
-                                        placeholder="127.0.0.1"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeScenario.type === 'token' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">Authorization Token</label>
-                                    <textarea
-                                        rows="3"
-                                        name="token"
-                                        onChange={e => setFormData({ ...formData, token: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-[10px] break-all font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner resize-none"
-                                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeScenario.type === 'api' && (
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-mono text-cyan-400 uppercase tracking-wider mb-2">User ID (Numeric)</label>
-                                    <input
-                                        type="text"
-                                        name="id"
-                                        onChange={e => setFormData({ ...formData, id: e.target.value })}
-                                        className="w-full bg-black/50 border border-cyan-500/20 rounded-lg p-3 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none text-white transition-all shadow-inner"
-                                        placeholder="42"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        <button
-                            type="submit"
-                            disabled={isLoadingEngine}
-                            className={`w-full mt-6 py-3 rounded-lg font-black uppercase tracking-widest transition-all ${isLoadingEngine ? 'bg-white/10 text-white/30 cursor-not-allowed' : 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(0,212,255,0.4)] hover:shadow-[0_0_25px_rgba(0,212,255,0.6)] hover:bg-cyan-400 scale-[1.02] active:scale-95'}`}
-                        >
-                            {isLoadingEngine ? (
-                                <span className="flex items-center justify-center gap-2">
-                                    <RefreshCw className="w-5 h-5 animate-spin" />
-                                    PROCESSING...
-                                </span>
-                            ) : (
-                                'Submit Payload'
-                            )}
-                        </button>
-                    </form>
-
-                    {/* Output Viewer within Target Panel below the form */}
-                    <AnimatePresence>
-                        {responsePayload && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="w-full max-w-sm mt-6 mb-10"
-                            >
-                                <div className="text-[10px] font-mono text-white/40 uppercase mb-2">Simulated Output</div>
-                                <div className={`p-4 rounded-xl border font-mono text-xs overflow-x-auto ${isExploit ? 'bg-green-500/10 border-green-500/30 text-green-300' : 'bg-white/5 border-white/10 text-white/70'}`}>
-                                    {responsePayload}
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-                {/* Confetti Effects */}
-                {showConfetti && (
-                    <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
-                        <div className="w-full h-full absolute inset-0 mix-blend-screen bg-[radial-gradient(circle_at_center,rgba(0,255,136,0.3)_0%,transparent_70%)] animate-pulse"></div>
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-    return (
-        <div className="h-screen bg-[#0a0a0f] text-white flex flex-col font-body selection:bg-cyan-500/30 overflow-hidden">
-            {/* Top Navigation / Scenario Selector */}
-            <div className="flex-shrink-0 h-16 border-b border-white/10 bg-black/60 backdrop-blur-md flex items-center px-6 gap-6 relative z-30">
-                <div className="flex items-center gap-3 w-[360px]">
-                    <Terminal className="w-6 h-6 text-cyan-400" />
-                    <h1 className="text-xl font-display font-black tracking-tight text-white/90">
-                        AI <span className="text-cyan-400">Attack Simulator</span>
-                    </h1>
-                </div>
-
-                <div className="flex-1 flex justify-center gap-2 overflow-x-auto hide-scrollbar">
-                    {SCENARIOS.map(s => (
-                        <button
-                            key={s.id}
-                            onClick={() => setActiveScenario(s)}
-                            className={`px-4 py-2 rounded-full text-xs font-mono uppercase tracking-wider transition-all whitespace-nowrap border ${activeScenario.id === s.id ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 shadow-[0_0_15px_rgba(0,212,255,0.2)]' : 'bg-transparent border-transparent text-white/40 hover:text-white/80 hover:bg-white/5'}`}
-                        >
-                            {s.title}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="w-[360px] flex justify-end">
-                    <div className="flex items-center gap-2">
-                        <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-                        </span>
-                        <span className="text-[10px] font-mono text-cyan-400/80 uppercase tracking-widest">Simulator Active</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Content Panels */}
-            <div className="flex-1 flex overflow-hidden">
-
-                {/* LEFT PANEL: CYBER SAGE */}
-                <div className="w-[360px] border-r border-white/10 bg-black/40 flex flex-col z-20">
-                    <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/60 shadow-md">
-                        <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
-                                <Shield className="w-4 h-4" />
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-bold text-orange-400 tracking-wide">Cyber Sage</h3>
-                                <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">AI Mentor Active</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-gradient-to-b from-black/0 to-black/20">
-                        {sageMessages.map((msg, i) => (
-                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-white/10 text-white rounded-br-sm' : 'bg-orange-500/5 border border-orange-500/20 text-orange-50/90 rounded-bl-sm shadow-[0_4px_20px_rgba(249,115,22,0.05)]'}`}>
-                                    {msg.content}
-                                </div>
-                            </div>
-                        ))}
-                        {isSageTyping && (
-                            <div className="flex justify-start">
-                                <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl rounded-bl-sm p-4 flex gap-1 items-center">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-bounce"></span>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-bounce" style={{ animationDelay: '0.1s' }}></span>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                                </div>
-                            </div>
-                        )}
-                        <div ref={chatEndRef} />
-                    </div>
-
-                    <div className="p-4 border-t border-white/5 bg-black/60">
-                        <form onSubmit={handleSageUserSubmit} className="flex gap-2">
-                            <input
-                                type="text"
-                                value={sageInput}
-                                onChange={e => setSageInput(e.target.value)}
-                                placeholder="Ask Cyber Sage for a hint..."
-                                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/50 outline-none transition-all placeholder-white/20"
-                            />
-                            <button
-                                type="submit"
-                                disabled={isSageTyping || !sageInput.trim()}
-                                className="w-12 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
-                            >
-                                <Send className="w-4 h-4" />
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-                {/* CENTER PANEL: TARGET SYSTEM */}
-                <div className="flex-1 border-r border-white/10 relative shadow-2xl z-10 flex flex-col">
-                    <TargetForm />
-
-                    {/* Next Scenario Button if Exploit success */}
-                    <AnimatePresence>
-                        {isExploit && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: 20 }}
-                                className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30"
-                            >
-                                <button className="bg-green-500 text-black px-8 py-4 rounded-xl font-black uppercase tracking-widest text-sm shadow-[0_0_30px_rgba(0,255,136,0.3)] hover:scale-105 transition-transform flex items-center gap-2">
-                                    <CheckCircle className="w-5 h-5" /> Mission Complete
-                                </button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-
-                {/* RIGHT PANEL: ATTACK CONSOLE */}
-                <div className="w-[400px] bg-[#050508] flex flex-col z-20">
-                    <div className="p-4 border-b border-white/5 bg-black/80 flex items-center gap-2 shadow-md">
-                        <Code className="w-4 h-4 text-white/40" />
-                        <h3 className="text-xs font-mono text-white/50 uppercase tracking-widest">Attack Console</h3>
-                    </div>
-
-                    <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
-                        {/* Request Logger Viewer */}
-                        <div className="flex flex-col flex-1">
-                            <label className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2 flex justify-between">
-                                <span>Raw HTTP Request</span>
-                                <span className="text-cyan-400">{activeScenario.defaultPath}</span>
-                            </label>
-                            <div className="bg-black/60 border border-white/10 rounded-xl p-4 font-mono text-[10px] text-white/70 overflow-x-auto shadow-inner h-[200px]">
-                                {requestPayload ? (
-                                    <>
-                                        <div className="text-cyan-300/80 mb-2">Host: vulnerable.host.local</div>
-                                        <div className="text-cyan-300/80 mb-4">Content-Type: application/json</div>
-                                        <pre className="text-orange-400 whitespace-pre-wrap">{requestPayload}</pre>
-                                    </>
-                                ) : (
-                                    <div className="text-white/20 italic h-full flex items-center justify-center">Awaiting payload injection...</div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Direct Payload Injector area (for aesthetics / advanced user feel) */}
-                        <div className="glass-card bg-cyan-500/5 border-cyan-500/20 p-4 rounded-xl flex items-start gap-3">
-                            <Info className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
-                            <p className="text-[10px] font-mono text-cyan-400/80 leading-relaxed uppercase pr-2">
-                                Notice: Raw payload interception is active. The AI Engine interprets attacks based on realistic vulnerability patterns. Be precise.
-                            </p>
-                        </div>
-
-                        {/* Raw Response Viewer */}
-                        <div className="flex flex-col flex-1 mt-2">
-                            <label className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2 flex justify-between items-center">
-                                <span>Raw Server Response</span>
-                                {statusCode && (
-                                    <span className={`px-2 py-0.5 rounded text-[9px] ${statusCode >= 400 ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
-                                        HTTP {statusCode}
-                                    </span>
-                                )}
-                            </label>
-                            <div className="bg-black/60 border border-white/10 rounded-xl p-4 font-mono text-[10px] shadow-inner h-[220px] overflow-y-auto relative text-white/70">
-                                {isLoadingEngine ? (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-cyan-400/50">
-                                        <RefreshCw className="w-6 h-6 animate-spin mb-3" />
-                                        <div className="uppercase tracking-widest text-[9px]">Awaiting Server Response</div>
-                                    </div>
-                                ) : responsePayload ? (
-                                    <div className="whitespace-pre-wrap overflow-hidden" style={{ animation: 'typewriter 0.5s steps(40, end)' }}>
-                                        {responsePayload}
-                                    </div>
-                                ) : (
-                                    <div className="text-white/20 italic h-full flex items-center justify-center">No response received...</div>
-                                )}
-
-                                <style dangerouslySetInnerHTML={{
-                                    __html: `
-                                    @keyframes typewriter {
-                                        from { width: 0; opacity: 0; }
-                                        to { width: 100%; opacity: 1; }
-                                    }
-                                `}} />
-                            </div>
-
-                            {/* Technical Detail if Exploit */}
-                            <AnimatePresence>
-                                {isExploit && technicalDetail && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        className="mt-4 p-4 border border-green-500/30 bg-green-500/10 rounded-xl overflow-hidden"
-                                    >
-                                        <div className="flex items-center gap-2 text-[10px] font-mono text-green-400 font-black uppercase mb-2">
-                                            <Bug className="w-3 h-3" /> Technical Breakdown
-                                        </div>
-                                        <div className="text-[10px] font-mono text-green-300/80 leading-relaxed">
-                                            {technicalDetail}
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
+  return (
+    <div className="h-screen bg-[#0a0a0f] text-white flex flex-col font-body selection:bg-cyan-500/30 overflow-hidden">
+      {/* ── Top Header / Scenario Selector ────────────────────────────────── */}
+      <header className="flex-shrink-0 h-16 border-b border-white/10 bg-black/70 backdrop-blur-md flex items-center justify-between pl-6 pr-48 z-20">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+            <Shield className="w-5 h-5 text-black" />
+          </div>
+          <div>
+            <h1 className="text-base font-black tracking-tight text-white flex items-center gap-2 font-display">
+              Cyber Lab <span className="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-mono border border-cyan-500/30">Vulnerable Sandbox</span>
+            </h1>
+            <p className="text-[10px] text-white/40 font-mono uppercase tracking-wider">Attack · Analyze · Fix · Verify</p>
+          </div>
         </div>
-    );
+
+        {/* Scenario Tabs & Actions */}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
+            {SCENARIOS.map(s => {
+              const isDone = completedScenarios[s.id];
+              const isActive = activeScenario.id === s.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => handleSelectScenario(s)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                    isActive 
+                      ? 'bg-cyan-500 text-black font-bold shadow-[0_0_15px_rgba(0,212,255,0.4)]' 
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {isDone ? <CheckCircle className="w-3.5 h-3.5 text-green-950" /> : <Flame className={`w-3.5 h-3.5 ${isActive ? 'text-black' : 'text-cyan-400'}`} />}
+                  <span>{s.title}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleResetSandbox}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 text-xs font-mono border border-purple-500/30 transition-colors"
+            title="Wipe and reseed sandbox database"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
+            <span>Reset DB</span>
+          </button>
+
+          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span>Live Sandbox</span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main Workspace ─────────────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* ── LEFT PANE: Monaco Payload Editor & Form Inputs ─────────────────── */}
+        <div className="w-[380px] border-r border-white/10 bg-[#0c0d14] flex flex-col flex-shrink-0 z-20">
+          <div className="p-4 border-b border-white/10 bg-black/40 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs font-mono uppercase tracking-wider text-cyan-300 font-bold">1. Craft Exploit Payload</span>
+            </div>
+            <span className="text-[10px] font-mono text-white/40">Monaco Editor</span>
+          </div>
+
+          <div className="flex-1 p-4 flex flex-col space-y-4 overflow-y-auto custom-scrollbar">
+            {/* Target Info */}
+            <div className="p-3 rounded-xl bg-cyan-500/5 border border-cyan-500/20">
+              <div className="text-[11px] font-mono text-cyan-400 uppercase font-bold">{activeScenario.targetApp}</div>
+              <div className="text-xs text-white/60 mt-1">{activeScenario.subtitle}</div>
+              <div className="text-[10px] text-orange-400/80 font-mono mt-2 flex items-center gap-1">
+                <Bug className="w-3 h-3" /> OWASP: {activeScenario.owasp}
+              </div>
+            </div>
+
+            {/* Form controls based on scenario */}
+            {activeScenario.id === 'sqli' ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-white/60 mb-1">Username Payload (Vulnerable parameter)</label>
+                  <input
+                    type="text"
+                    value={sqliUsername}
+                    onChange={(e) => {
+                      setSqliUsername(e.target.value);
+                      setPayload(e.target.value);
+                    }}
+                    className="w-full bg-black/60 border border-cyan-500/30 rounded-lg p-2.5 text-xs font-mono text-cyan-300 focus:border-cyan-400 outline-none"
+                    placeholder="Enter SQL payload..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-white/60 mb-1">Password</label>
+                  <input
+                    type="text"
+                    value={sqliPassword}
+                    onChange={(e) => setSqliPassword(e.target.value)}
+                    className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-xs font-mono text-white/70 focus:border-cyan-400 outline-none"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-white/60 mb-1">Author Name</label>
+                  <input
+                    type="text"
+                    value={xssAuthor}
+                    onChange={(e) => setXssAuthor(e.target.value)}
+                    className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-xs font-mono text-white/70 focus:border-cyan-400 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-white/60 mb-1">Comment Payload (Monaco Editor)</label>
+                  <div className="h-36 border border-cyan-500/30 rounded-lg overflow-hidden bg-black/60">
+                    <Editor
+                      height="100%"
+                      language="html"
+                      theme="vs-dark"
+                      value={payload}
+                      onChange={(val) => setPayload(val || '')}
+                      options={{
+                        fontSize: 12,
+                        minimap: { enabled: false },
+                        lineNumbers: 'off',
+                        wordWrap: 'on',
+                        padding: { top: 8, bottom: 8 }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Presets */}
+            <div>
+              <div className="text-[10px] font-mono text-white/40 uppercase mb-1.5">Preset Payloads</div>
+              <div className="flex flex-wrap gap-1.5">
+                {activeScenario.presetPayloads.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setPayload(preset.payload);
+                      if (activeScenario.id === 'sqli') setSqliUsername(preset.payload);
+                    }}
+                    className="px-2.5 py-1 rounded bg-white/5 hover:bg-cyan-500/20 text-white/70 hover:text-cyan-300 border border-white/10 text-[10px] font-mono transition-colors"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Run Attack Button */}
+            <button
+              onClick={handleRunAttack}
+              disabled={isExecuting}
+              className={`w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-2 transition-all ${
+                isExecuting 
+                  ? 'bg-white/10 text-white/40 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)] hover:scale-[1.02] active:scale-95'
+              }`}
+            >
+              {isExecuting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              <span>{isExecuting ? 'Executing Attack...' : '2. Run Attack on Vulnerable Endpoint'}</span>
+            </button>
+
+            {/* Verify Fix Button (Prominently displayed after attack run) */}
+            {attackResult && (
+              <button
+                onClick={handleVerifyFix}
+                disabled={isVerifying}
+                className={`w-full py-2.5 rounded-xl font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-2 transition-all border ${
+                  isVerifying
+                    ? 'bg-white/10 text-white/40 border-white/10 cursor-not-allowed'
+                    : 'bg-green-500/20 text-green-300 border-green-500/40 hover:bg-green-500/30 hover:border-green-400 active:scale-95 shadow-[0_0_15px_rgba(34,197,94,0.2)]'
+                }`}
+              >
+                {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4 text-green-400" />}
+                <span>{isVerifying ? 'Verifying Patch...' : '4. Verify Fix against Secured Route'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── CENTER & RIGHT SPLIT: Live Target Preview + AI Explanation ────── */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex border-b border-white/10 overflow-hidden">
+
+            {/* Live Preview Pane */}
+            <div className="flex-1 flex flex-col bg-[#050508] border-r border-white/10">
+              <div className="p-3 border-b border-white/10 bg-black/40 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs font-mono uppercase tracking-wider text-cyan-300 font-bold">Target App Live Preview</span>
+                </div>
+                {attackResult?.exploited && (
+                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/50 text-red-400 text-[10px] font-mono font-bold flex items-center gap-1 animate-pulse">
+                    <Flame className="w-3 h-3" /> EXPLOITED!
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 p-4 overflow-y-auto flex flex-col justify-center items-center">
+                {activeScenario.id === 'sqli' ? (
+                  <div className="w-full max-w-md glass-card p-6 rounded-2xl border border-white/10 bg-black/50 space-y-4">
+                    <div className="text-center border-b border-white/10 pb-3">
+                      <h3 className="font-display font-bold text-lg text-cyan-400">SecureBank Portal</h3>
+                      <p className="text-xs text-white/50 font-mono">Authentication Endpoint</p>
+                    </div>
+
+                    <div className="bg-black/90 p-3 rounded-xl border border-orange-500/30 font-mono text-[11px]">
+                      <div className="text-white/40 mb-1 flex items-center justify-between">
+                        <span>// Executed Query in SQLite Sandbox:</span>
+                        <span className="text-[9px] text-cyan-400">Live Interpolation</span>
+                      </div>
+                      <div className="text-orange-400 break-all font-bold">
+                        {attackResult?.query || `SELECT * FROM users WHERE username = '${sqliUsername}' AND password = '${sqliPassword}'`}
+                      </div>
+                    </div>
+
+                    {/* Leaked Data Results Payoff Panel */}
+                    {attackResult && (
+                      <div className="space-y-2">
+                        {attackResult.exploited ? (
+                          <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/40 text-red-400 text-xs font-mono font-bold flex items-center justify-between animate-pulse">
+                            <span className="flex items-center gap-1.5"><Flame className="w-4 h-4" /> 🚨 DATA LEAK DETECTED!</span>
+                            <span className="text-[10px] bg-red-500/20 px-2 py-0.5 rounded">{attackResult.rowCount} ROWS EXPOSED</span>
+                          </div>
+                        ) : fixResult?.blocked ? (
+                          <div className="p-2.5 rounded-xl bg-green-500/10 border border-green-500/40 text-green-400 text-xs font-mono font-bold flex items-center justify-between">
+                            <span className="flex items-center gap-1.5"><ShieldCheck className="w-4 h-4" /> 🛡️ EXPLOIT BLOCKED BY PATCH</span>
+                            <span className="text-[10px] bg-green-500/20 px-2 py-0.5 rounded">0 ROWS EXPOSED</span>
+                          </div>
+                        ) : null}
+
+                        <div className="text-xs font-mono text-white/70 flex items-center justify-between">
+                          <span>Database Output ({attackResult.rowCount} rows returned):</span>
+                        </div>
+
+                        {attackResult.rowCount > 0 ? (
+                          <div className="max-h-48 overflow-y-auto bg-black/80 border border-white/10 rounded-xl p-2.5 text-[10px] font-mono space-y-1.5 custom-scrollbar">
+                            {attackResult.results.map((u, i) => (
+                              <div key={i} className="p-2 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between gap-2 hover:bg-white/10 transition-colors">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold">{u.role}</span>
+                                  <span className="text-white font-bold">{u.username}</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-white/60">
+                                  <span>Pass: <code className="text-orange-300">{u.password}</code></span>
+                                  <span className="text-green-400 font-bold">${u.balance}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl font-mono text-center">
+                            Authentication Failed: Invalid Credentials (0 rows returned)
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col rounded-xl overflow-hidden border border-white/10 bg-black">
+                    <div className="p-2 bg-white/5 border-b border-white/10 text-[11px] font-mono text-white/50 flex items-center justify-between">
+                      <span>Sandboxed Iframe Preview (<code className="text-cyan-400">sandbox="allow-scripts"</code>)</span>
+                      <span className="text-[10px] text-green-400">Contains script execution safety</span>
+                    </div>
+                    <div className="flex-1 bg-[#0a0a0f]">
+                      {xssIframeHtml ? (
+                        <iframe
+                          title="XSS Sandbox Preview"
+                          sandbox="allow-scripts"
+                          srcDoc={xssIframeHtml}
+                          className="w-full h-full border-0"
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-white/30 font-mono text-xs">
+                          Click "Run Attack" to render comments in isolated iframe...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* AI Explanation Pane */}
+            <div className="w-[420px] bg-[#08080d] flex flex-col z-20 flex-shrink-0">
+              <div className="p-3 border-b border-white/10 bg-black/40 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bug className="w-4 h-4 text-orange-400" />
+                  <span className="text-xs font-mono uppercase tracking-wider text-orange-300 font-bold">3. AI Vulnerability Breakdown</span>
+                </div>
+                {isAiLoading && <RefreshCw className="w-3.5 h-3.5 text-orange-400 animate-spin" />}
+              </div>
+
+              <div className="flex-1 p-4 overflow-y-auto space-y-4 font-mono text-xs">
+                {isAiLoading ? (
+                  <div className="h-full flex flex-col items-center justify-center text-orange-400/60 space-y-2">
+                    <RefreshCw className="w-6 h-6 animate-spin" />
+                    <span className="text-xs">Analyzing attack mechanics...</span>
+                  </div>
+                ) : aiAnalysis ? (
+                  <>
+                    <div className="p-3 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-300">
+                      <div className="text-[10px] text-orange-400 uppercase font-bold mb-1">OWASP Classification</div>
+                      <div className="font-bold text-xs">{aiAnalysis.owaspCategory}</div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
+                      <div className="text-[10px] text-cyan-400 uppercase font-bold">Vulnerability Mechanism</div>
+                      <p className="text-white/80 leading-relaxed font-sans text-xs">{aiAnalysis.explanation}</p>
+                      <div className="text-[10px] text-red-400 mt-2">
+                        ⚠️ Vulnerable Statement: Line {aiAnalysis.vulnerableLine} in backend controller
+                      </div>
+                    </div>
+
+                    {/* Verify Fix Action */}
+                    <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 space-y-3">
+                      <div className="flex items-center gap-2 text-green-400 font-bold text-xs">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>4. Verify Patch against Secured Route</span>
+                      </div>
+                      <p className="text-[11px] text-green-300/80 font-sans">
+                        Re-run the exact same payload against the fixed route variant to confirm parameterization / escaping blocks the exploit.
+                      </p>
+                      <button
+                        onClick={handleVerifyFix}
+                        disabled={isVerifying}
+                        className="w-full py-2.5 rounded-lg bg-green-500 text-black font-bold text-xs hover:bg-green-400 transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                      >
+                        {isVerifying ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                        <span>Verify Fix Implementation</span>
+                      </button>
+                    </div>
+
+                    {fixResult && (
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs">
+                        <div className="font-bold text-blue-400 flex items-center gap-1.5 mb-1">
+                          <CheckCircle className="w-4 h-4 text-green-400" /> Fix Verification Result:
+                        </div>
+                        <p className="text-[11px] font-sans leading-relaxed">{fixResult.message || 'Payload successfully neutralized by fixed endpoint.'}</p>
+                      </motion.div>
+                    )}
+                  </>
+                ) : attackResult && !attackResult.exploited ? (
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3 font-sans text-xs">
+                    <div className="flex items-center gap-2 text-yellow-400 font-mono font-bold text-xs">
+                      <Info className="w-4 h-4" />
+                      <span>Benign Input / Clean Execution</span>
+                    </div>
+                    <p className="text-white/70 leading-relaxed text-[11px]">
+                      The submitted input did not trigger a vulnerability or bypass authentication. The query executed safely as standard text.
+                    </p>
+                    <div className="p-2.5 rounded-lg bg-black/50 border border-white/10 text-[10px] font-mono text-cyan-300">
+                      💡 Tip: Try entering a payload like <code className="text-orange-400 font-bold">' OR '1'='1' --</code> to break string literal boundaries and trigger an exploit breakdown.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-white/30 text-center font-sans text-xs">
+                    Run an attack to generate an AI breakdown of the vulnerability and compare code fixes.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── BOTTOM DRAWER: Monaco Diff Editor (Collapsible Drawer) ────────── */}
+          <motion.div 
+            animate={{ height: showDiffDrawer ? 280 : 38 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="bg-[#090a10] border-t border-white/10 flex flex-col z-30 shadow-2xl overflow-hidden"
+          >
+            {/* Clickable Header Bar */}
+            <div 
+              onClick={() => setShowDiffDrawer(!showDiffDrawer)}
+              className="h-[38px] px-4 bg-black/80 border-b border-white/10 flex items-center justify-between text-xs font-mono cursor-pointer hover:bg-white/5 transition-colors select-none flex-shrink-0"
+            >
+              <div className="flex items-center gap-2 font-bold">
+                <Code className="w-4 h-4 text-cyan-400" />
+                <span className="text-cyan-300">Monaco Code Comparison</span>
+                <span className="text-[10px] text-white/40 font-normal hidden sm:inline">(Vulnerable vs Fixed Controller)</span>
+                {attackResult && (
+                  <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                    Patch Diff Ready
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="hidden md:flex items-center gap-3 text-[10px] mr-2">
+                  <span className="text-red-400">Original (Vulnerable)</span>
+                  <ArrowRight className="w-3 h-3 text-white/40" />
+                  <span className="text-green-400">Modified (Fixed)</span>
+                </div>
+                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-white/70 text-[11px] font-mono transition-colors">
+                  <span>{showDiffDrawer ? 'Hide Diff' : 'View Code Diff'}</span>
+                  {showDiffDrawer ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronUp className="w-3.5 h-3.5 text-cyan-400" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Expanded Monaco Diff Editor */}
+            {showDiffDrawer && (
+              <div className="flex-1 bg-[#090a10]">
+                <DiffEditor
+                  height="100%"
+                  language="javascript"
+                  theme="vs-dark"
+                  original={activeScenario.vulnerableSnippet}
+                  modified={aiAnalysis?.fixedCode || activeScenario.fixedSnippet}
+                  options={{
+                    fontSize: 12,
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    renderSideBySide: true,
+                    padding: { top: 8, bottom: 8 }
+                  }}
+                />
+              </div>
+            )}
+          </motion.div>
+        </div>
+
+      </div>
+    </div>
+  );
 }

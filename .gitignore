@@ -10,3 +10,8 @@ build/
 .DS_Store
 *.pem
 deplo.sh
+
+# Databases
+*.db
+*.db-shm
+*.db-wal

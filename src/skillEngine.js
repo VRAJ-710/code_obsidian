@@ -3,7 +3,7 @@
 // Uses keyword extraction, sentiment analysis, and performance patterns
 
 // ── Skill keyword map ─────────────────────────────────────────────────
-const SKILL_KEYWORDS = {
+export const SKILL_KEYWORDS = {
   Variables: [
     'variable', 'var', 'let', 'const', 'declare', 'assign', 'value', 'name',
     'identifier', 'initialize', 'undefined', 'null', 'scope',
@@ -45,6 +45,21 @@ const SKILL_KEYWORDS = {
     'complexity', 'big o', 'o(n)', 'o(1)', 'o(log n)', 'efficient',
     'performance', 'algorithm', 'optimize', 'quadratic', 'linear',
     'constant', 'logarithmic', 'space complexity', 'runtime',
+  ],
+  Python: [
+    'python', 'py', 'django', 'flask', 'fastapi', 'pip', 'pytest', 'pandas', 'numpy',
+  ],
+  JavaScript: [
+    'javascript', 'js', 'typescript', 'ts', 'ecmascript', 'es6', 'npm', 'yarn',
+  ],
+  React: [
+    'react', 'jsx', 'tsx', 'state', 'hooks', 'useeffect', 'usestate', 'redux', 'next.js',
+  ],
+  'Node.js': [
+    'node', 'express', 'backend', 'npm', 'middleware', 'async', 'event loop',
+  ],
+  SQL: [
+    'sql', 'database', 'postgres', 'postgresql', 'mysql', 'sqlite', 'query', 'join', 'orm',
   ],
   'Web Hacking': [
     'sql', 'injection', 'xss', 'cross site', 'scripting', 'payload', 'bypass',
@@ -252,11 +267,13 @@ export const processInteraction = ({
  * @returns {Array} sorted list of gap objects
  */
 export const analyzeGaps = (skills) => {
+  if (!skills || typeof skills !== 'object') return []
   return Object.entries(skills)
+    .filter(([, data]) => data && typeof data.mastery === 'number')
     .map(([name, data]) => ({
       name,
       ...data,
-      gapScore: (100 - data.mastery) * (data.errorFreq / 10 + 1),
+      gapScore: (100 - data.mastery) * ((data.errorFreq || 0) / 10 + 1),
     }))
     .sort((a, b) => b.gapScore - a.gapScore)
 }
@@ -265,7 +282,9 @@ export const analyzeGaps = (skills) => {
  * Get overall progress score (0-100)
  */
 export const getOverallProgress = (skills) => {
-  const vals = Object.values(skills)
+  if (!skills || typeof skills !== 'object') return 0
+  const vals = Object.values(skills).filter(s => s && typeof s.mastery === 'number')
+  if (vals.length === 0) return 0
   return Math.round(vals.reduce((sum, s) => sum + s.mastery, 0) / vals.length)
 }
 
@@ -274,8 +293,10 @@ export const getOverallProgress = (skills) => {
  * Higher = more challenged (could be good or overwhelming)
  */
 export const getCognitiveLoad = (skills) => {
-  const vals = Object.values(skills)
-  const avgErrors = vals.reduce((s, v) => s + v.errorFreq, 0) / vals.length
+  if (!skills || typeof skills !== 'object') return 0
+  const vals = Object.values(skills).filter(s => s && typeof s.mastery === 'number')
+  if (vals.length === 0) return 0
+  const avgErrors = vals.reduce((s, v) => s + (v.errorFreq || 0), 0) / vals.length
   const avgMastery = vals.reduce((s, v) => s + v.mastery, 0) / vals.length
   // High errors + low mastery = high cognitive load
   return Math.min(100, Math.round((avgErrors * 3) + ((100 - avgMastery) * 0.4)))

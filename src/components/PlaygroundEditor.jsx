@@ -189,6 +189,7 @@ export default function PlaygroundEditor({ onAskAgent, onSkillUpdate, currentSki
   const [aiHint, setAiHint] = useState(null)
   const [stdin, setStdin] = useState('')
   const [showStdin, setShowStdin] = useState(false)
+  const [isOutputExpanded, setIsOutputExpanded] = useState(false)
   const nextTabId = useRef(2)
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
@@ -329,13 +330,8 @@ export default function PlaygroundEditor({ onAskAgent, onSkillUpdate, currentSki
 
       const response = await callAI(systemPrompt, [{ role: 'user', content: userMessage }])
       setAiHint({ agent: agentType === 'debugger' ? 'Rex 🐛' : 'Sage 🧠', text: response })
-    } catch {
-      setAiHint({
-        agent: output?.type === 'error' ? 'Rex 🐛' : 'Sage 🧠',
-        text: output?.type === 'error'
-          ? "Read the error message carefully — it tells you the exact line and type of error. What does it say? Once you identify the error TYPE (syntax/runtime/logic), you've already solved 50% of the problem."
-          : "Your code is structured well! To level it up: (1) add input validation, (2) consider edge cases like empty/null inputs, (3) think about time complexity — could any loops be eliminated?"
-      })
+    } catch (err) {
+      console.warn('AI Hint error:', err);
     } finally {
       setAiLoading(false)
     }
@@ -552,23 +548,34 @@ export default function PlaygroundEditor({ onAskAgent, onSkillUpdate, currentSki
           {output && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 220, opacity: 1 }}
+              animate={{ height: isOutputExpanded ? 480 : 220, opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="border-t border-white/10 bg-black/50 flex-shrink-0 flex flex-col overflow-hidden"
+              transition={{ duration: 0.25, ease: 'easeInOut' }}
+              className="border-t border-white/10 bg-[#07070c] flex-shrink-0 flex flex-col overflow-hidden shadow-2xl z-20"
             >
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
+              <div className="flex items-center justify-between px-4 py-2 bg-black/60 border-b border-white/10 flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <div className={`w - 2 h - 2 rounded - full animate - pulse ${output.type === 'success' ? 'bg-green-400' :
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${
+                    output.type === 'success' ? 'bg-green-400' :
                     output.type === 'demo' ? 'bg-yellow-400' : 'bg-red-400'
-                    } `} />
-                  <span className="text-xs font-semibold text-white/60">
+                  }`} />
+                  <span className="text-xs font-semibold font-mono text-white/80">
                     {output.type === 'success' ? `✅ ${output.lang} Output` :
                       output.type === 'demo' ? `🎭 ${output.lang} Demo` :
-                        `❌ ${output.label || 'Error'} `}
+                        `❌ ${output.label || 'Error'}`}
                   </span>
-                  {output.time && <span className="text-xs text-white/25">⏱ {output.time}s · 💾 {output.memory}KB</span>}
+                  {output.time && <span className="text-xs text-white/40 font-mono">⏱ {output.time}s · 💾 {output.memory}KB</span>}
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Expand / Shrink Button */}
+                  <button
+                    onClick={() => setIsOutputExpanded(!isOutputExpanded)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-xs font-mono border border-white/10 transition-colors"
+                    title={isOutputExpanded ? "Shrink Output Window" : "Enlarge Output Window"}
+                  >
+                    <span>{isOutputExpanded ? '⤓ Shrink' : '⤢ Enlarge'}</span>
+                  </button>
+
                   <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                     onClick={getAiHint} disabled={aiLoading}
                     className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary/20 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary/30 transition-all disabled:opacity-50"
@@ -582,13 +589,14 @@ export default function PlaygroundEditor({ onAskAgent, onSkillUpdate, currentSki
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {output.note && (
                   <div className="text-xs text-yellow-400/60 mb-2">{output.note}</div>
                 )}
-                <pre className={`font - mono text - sm whitespace - pre - wrap leading - relaxed ${output.type === 'success' ? 'text-green-300' :
+                <pre className={`font-mono text-sm whitespace-pre-wrap leading-relaxed ${
+                  output.type === 'success' ? 'text-green-300' :
                   output.type === 'demo' ? 'text-yellow-300' : 'text-red-300'
-                  } `}>
+                }`}>
                   {output.text}
                 </pre>
                 <AnimatePresence>

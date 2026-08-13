@@ -29,6 +29,9 @@ body {
   background: #FF6B35;
   border-radius: 3px;
 }
+::-webkit-scrollbar:horizontal {
+  display: none;
+}
 
 @layer components {
   .glass-card {

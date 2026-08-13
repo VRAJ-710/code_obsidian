@@ -1,4 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL + '/api';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = `${BASE_URL.replace(/\/+$/, '')}/api`;
 
 export const dbService = {
     // --- Auth ---
@@ -9,8 +10,14 @@ export const dbService = {
             body: JSON.stringify({ username, password })
         });
         if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || 'Failed to register');
+            let errorMsg = 'Failed to register';
+            try {
+                const data = await res.json();
+                errorMsg = data.error || errorMsg;
+            } catch (e) {
+                errorMsg = `Server error (${res.status})`;
+            }
+            throw new Error(errorMsg);
         }
         return res.json();
     },
@@ -22,8 +29,14 @@ export const dbService = {
             body: JSON.stringify({ username, password })
         });
         if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || 'Failed to login');
+            let errorMsg = 'Failed to login';
+            try {
+                const data = await res.json();
+                errorMsg = data.error || errorMsg;
+            } catch (e) {
+                errorMsg = `Invalid username or password (${res.status})`;
+            }
+            throw new Error(errorMsg);
         }
         return res.json();
     },
@@ -67,15 +80,66 @@ export const dbService = {
         }
     },
 
-    async saveChatMessage(username, agentId, message) {
+    async saveChatMessage(username, agentId, msg) {
         try {
             await fetch(`${API_URL}/chat/${username}/${agentId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(message)
+                body: JSON.stringify({
+                    role: msg.role,
+                    content: msg.content,
+                    timestamp: msg.timestamp
+                })
             });
         } catch (e) {
             console.error("Failed to save chat message:", e);
+        }
+    },
+
+    // --- Resume ---
+    async parseResume(file) {
+        const formData = new FormData();
+        formData.append('resume', file);
+
+        const res = await fetch(`${API_URL}/resume/parse`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!res.ok) {
+            let errorMsg = 'Could not read this file';
+            try {
+                const data = await res.json();
+                errorMsg = data.error || errorMsg;
+            } catch {}
+            throw new Error(errorMsg);
+        }
+        return res.json();
+    },
+
+    // --- Interview Sessions ---
+    async saveInterviewSession(username, sessionData) {
+        try {
+            const res = await fetch(`${API_URL}/interview/${username}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sessionData)
+            });
+            if (!res.ok) return null;
+            return res.json();
+        } catch (e) {
+            console.error("Failed to save interview session:", e);
+            return null;
+        }
+    },
+
+    async getInterviewSessions(username) {
+        try {
+            const res = await fetch(`${API_URL}/interview/${username}`);
+            if (!res.ok) return [];
+            return res.json();
+        } catch {
+            return [];
         }
     }
 };

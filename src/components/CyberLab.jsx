@@ -6,6 +6,7 @@ import {
   AlertTriangle, Bug, Code, Lock, ShieldCheck, Cpu, ArrowRight, Info,
   ChevronUp, ChevronDown
 } from 'lucide-react';
+import { BASE_URL } from '../dbService';
 
 const SCENARIOS = [
   {
@@ -143,10 +144,10 @@ export default function CyberLab({ currentUser, onSkillUpdate, skills }) {
     let endpoint = '';
 
     if (activeScenario.id === 'sqli') {
-      endpoint = '/cyberlab/sqli/vulnerable';
+      endpoint = `${BASE_URL}/cyberlab/sqli/vulnerable`;
       bodyData = { username: sqliUsername, password: sqliPassword };
     } else {
-      endpoint = '/cyberlab/xss/vulnerable';
+      endpoint = `${BASE_URL}/cyberlab/xss/vulnerable`;
       bodyData = { author: xssAuthor, comment: payload };
     }
 
@@ -205,7 +206,7 @@ Vulnerable Source Code:
 ${activeScenario.vulnerableSnippet}`;
 
     try {
-      const groqRes = await fetch('/api/groq', {
+      const groqRes = await fetch(`${BASE_URL}/api/groq`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -261,10 +262,10 @@ ${activeScenario.vulnerableSnippet}`;
     let endpoint = '';
 
     if (activeScenario.id === 'sqli') {
-      endpoint = '/cyberlab/sqli/fixed';
+      endpoint = `${BASE_URL}/cyberlab/sqli/fixed`;
       bodyData = { username: sqliUsername, password: sqliPassword };
     } else {
-      endpoint = '/cyberlab/xss/fixed';
+      endpoint = `${BASE_URL}/cyberlab/xss/fixed`;
       bodyData = { author: xssAuthor, comment: payload };
     }
 
@@ -301,7 +302,7 @@ ${activeScenario.vulnerableSnippet}`;
   // ── Step 5: Reset Sandbox Endpoint ───────────────────────────────────────
   const handleResetSandbox = async () => {
     try {
-      await fetch(`/cyberlab/reset/${activeScenario.id}`, {
+      await fetch(`${BASE_URL}/cyberlab/reset/${activeScenario.id}`, {
         method: 'POST',
         headers: { 'x-cyberlab-user': currentUser || 'anonymous' }
       });

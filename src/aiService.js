@@ -1,6 +1,7 @@
 // ── Code Obsidian AI Service (Multi-Provider & Multi-Key Resilient Architecture) ──
 // Supported Providers: Groq (Llama 3.3), Google Gemini (1.5 Flash), OpenRouter (DeepSeek R1), Ollama, and Smart Engine.
 import axios from 'axios';
+import { BASE_URL } from './dbService';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -213,7 +214,7 @@ export async function callAI(systemPrompt, messages) {
 
     // 4. Provider Tier 4: Server Backend Proxy (/api/groq)
     try {
-        const serverRes = await axios.post('/api/groq', { system: systemPrompt, messages, model: 'llama-3.3-70b-versatile' }, { timeout: 10000 });
+        const serverRes = await axios.post(`${BASE_URL}/api/groq`, { system: systemPrompt, messages, model: 'llama-3.3-70b-versatile' }, { timeout: 10000 });
         const text = serverRes.data?.choices?.[0]?.message?.content;
         if (text) {
             aiCache.set(cacheKey, { text, timestamp: Date.now() });

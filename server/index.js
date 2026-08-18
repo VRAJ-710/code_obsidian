@@ -39,8 +39,10 @@ app.post('/api/groq', async (req, res) => {
     for (let i = 0; i < attempts; i++) {
         try {
             const client = getGroqClient();
+            const defaultModel = process.env.VITE_GROQ_MODEL || 'groq/compound';
+            const targetModel = (!model || model === 'llama-3.3-70b-versatile') ? defaultModel : model;
             const response = await client.chat.completions.create({
-                model: model || 'llama-3.3-70b-versatile',
+                model: targetModel,
                 max_tokens: max_tokens || 1024,
                 messages: groqMessages
             });

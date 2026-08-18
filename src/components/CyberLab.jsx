@@ -210,7 +210,7 @@ ${activeScenario.vulnerableSnippet}`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
+          model: 'groq/compound',
           max_tokens: 1024,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }]

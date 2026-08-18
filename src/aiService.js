@@ -34,10 +34,11 @@ let activeGroqKeyIndex = 0;
 
 // Provider 1: Groq (Llama 3.3 70B)
 async function callGroqAPI(systemPrompt, messages, apiKey) {
+    const model = import.meta.env.VITE_GROQ_MODEL || 'groq/compound';
     const response = await axios.post(
         GROQ_URL,
         {
-            model: 'llama-3.3-70b-versatile',
+            model: model,
             messages: [{ role: 'system', content: systemPrompt }, ...messages],
             temperature: 0.7,
             max_tokens: 1500,
@@ -53,7 +54,8 @@ async function callGroqAPI(systemPrompt, messages, apiKey) {
 
 // Provider 2: Google Gemini (1.5 Flash)
 async function callGeminiAPI(systemPrompt, messages, geminiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+    const model = import.meta.env.VITE_GEMINI_MODEL || 'gemini-3.6-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
     const contents = [
         { role: 'user', parts: [{ text: `System Instruction:\n${systemPrompt}` }] },
         ...messages.map(m => ({
@@ -69,7 +71,7 @@ async function callGeminiAPI(systemPrompt, messages, geminiKey) {
 async function callOpenRouterAPI(systemPrompt, messages, openRouterKey) {
     const url = 'https://openrouter.ai/api/v1/chat/completions';
     const res = await axios.post(url, {
-        model: 'deepseek/deepseek-r1-distill-llama-70b:free',
+        model: 'dots-studio/dots-3-note-preview:free',
         messages: [{ role: 'system', content: systemPrompt }, ...messages]
     }, {
         headers: { 'Authorization': `Bearer ${openRouterKey}`, 'Content-Type': 'application/json' },
@@ -214,7 +216,7 @@ export async function callAI(systemPrompt, messages) {
 
     // 4. Provider Tier 4: Server Backend Proxy (/api/groq)
     try {
-        const serverRes = await axios.post(`${BASE_URL}/api/groq`, { system: systemPrompt, messages, model: 'llama-3.3-70b-versatile' }, { timeout: 10000 });
+        const serverRes = await axios.post(`${BASE_URL}/api/groq`, { system: systemPrompt, messages, model: 'groq/compound' }, { timeout: 10000 });
         const text = serverRes.data?.choices?.[0]?.message?.content;
         if (text) {
             aiCache.set(cacheKey, { text, timestamp: Date.now() });
